@@ -1,0 +1,46 @@
+# Compiled object files and static/shared libraries
+*.o
+*.obj
+*.lo
+*.a
+*.so
+*.dll
+*.dylib
+*.exe
+*.out
+
+# Build system outputs
+build/
+bin/
+lib/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Debugging and logs
+*.log
+*.dbg
+
+# Editor/IDE settings
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Temporary or backup files
+*~
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# GTK or Qt Designer autosaves
+*.glade~
+*.ui~
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
