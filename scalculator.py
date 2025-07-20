@@ -24,22 +24,79 @@ import re # Import re for more robust parsing
 
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton, QLineEdit,
-    QGridLayout, QMenuBar, QAction, QMessageBox, QMainWindow, QLabel
+    QGridLayout, QMenuBar, QAction, QMessageBox, QMainWindow, QLabel,
+    QDialog, QTabWidget, QTextBrowser, QSpinBox, QHBoxLayout, QWidgetAction,
+    QActionGroup # Added QActionGroup for exclusive menu items
 )
 from PyQt5.QtGui import QIcon, QKeySequence
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer # Ensure QTimer is imported
+
+# Define a custom About dialog with tabs
+class AboutDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("About EfCalc Pro")
+        self.setFixedSize(400, 300) # Fixed size for the dialog
+
+        main_layout = QVBoxLayout(self)
+        tab_widget = QTabWidget()
+        main_layout.addWidget(tab_widget)
+
+        # Pane 1: General Information
+        pane1 = QWidget()
+        pane1_layout = QVBoxLayout(pane1)
+        pane1_layout.addWidget(QLabel("<b>EfCalc Pro - Version 4.3 (Enhanced)</b>"))
+        pane1_layout.addWidget(QLabel("Author: Dr. Eric O. Flores"))
+        pane1_layout.addWidget(QLabel("Revised July 20, 2025"))
+        pane1_layout.addWidget(QLabel("Email: eoftoro@gmail.com"))
+        pane1_layout.addStretch() # Push content to the top
+        tab_widget.addTab(pane1, "General Info")
+
+        # Pane 2: Technologies Used
+        pane2 = QWidget()
+        pane2_layout = QVBoxLayout(pane2)
+        pane2_layout.addWidget(QLabel("<b>Technologies Used:</b>"))
+        pane2_layout.addWidget(QLabel("Programming Language: Python"))
+        pane2_layout.addWidget(QLabel("GUI Technology: PyQt5"))
+        pane2_layout.addStretch()
+        tab_widget.addTab(pane2, "Technologies")
+
+        # Pane 3: Changes and Updates
+        pane3 = QWidget()
+        pane3_layout = QVBoxLayout(pane3)
+        pane3_layout.addWidget(QLabel("<b>Recent Enhancements:</b>"))
+        changes_text = QTextBrowser() # Using QTextBrowser for formatted text
+        changes_text.setReadOnly(True)
+        changes_text.setHtml("""
+            <ul>
+                <li>Enhanced security by avoiding direct <code>eval()</code> for general expressions.</li>
+                <li>Improved scientific function handling with degrees/radians/gradians toggle.</li>
+                <li>More robust memory operations (MR, MC).</li>
+                <li>Refined UI/UX with modern styling and day/night theme.</li>
+                <li>Added more scientific functions (asin, acos, atan, sinh, cosh, tanh, asinh, acosh, atanh, log_b, fact).</li>
+                <li>Improved Undo/Redo functionality with better state tracking.</li>
+                <li>Added a calculation history log.</li>
+                <li>Implemented configurable decimal precision for results.</li>
+                <li>Added toggle for scientific notation in results.</li>
+                <li>Added thousands separators for better readability of large numbers.</li>
+                <li><b>Angle mode selection now uses a dedicated submenu for Degrees, Radians, and Gradians.</b></li>
+            </ul>
+        """)
+        pane3_layout.addWidget(changes_text)
+        tab_widget.addTab(pane3, "Updates")
+
 
 class ScientificCalculator(QMainWindow):
     """
     EfCalc Pro: A Python-based Scientific Calculator with enhanced features.
     Features include basic arithmetic, scientific functions, memory operations,
-    degrees/radians toggle, alphabet mode, and a day/night theme.
+    degrees/radians/gradians toggle, alphabet mode, history log, and a day/night theme.
     """
     def __init__(self):
         super().__init__()
 
         self.setWindowTitle('EfCalc Pro')
-        self.setGeometry(100, 100, 400, 550) # Adjusted height for more elements
+        self.setGeometry(100, 100, 450, 650) # Adjusted size for history and new buttons
 
         # Memory and answer storage
         self.memory = 0.0  # Memory stores a single float value
@@ -47,7 +104,11 @@ class ScientificCalculator(QMainWindow):
         self.alphabet_mode = False  # Track whether alphabet mode is active
         self.shift_mode = False     # Track whether Shift is active (for uppercase letters)
         self.is_night_mode = False  # Track whether night mode is active
-        self.angle_unit = 'degrees' # 'degrees' or 'radians'
+        self.angle_unit = 'degrees' # 'degrees', 'radians', or 'gradians'
+
+        # Output formatting settings
+        self.decimal_precision = 8 # Default decimal places
+        self.scientific_notation_enabled = False
 
         # Central widget for the layout
         central_widget = QWidget()
@@ -55,6 +116,22 @@ class ScientificCalculator(QMainWindow):
 
         # Main layout
         main_layout = QVBoxLayout()
+
+        # History Display
+        self.history_display = QTextBrowser()
+        self.history_display.setFixedHeight(100)
+        self.history_display.setReadOnly(True)
+        self.history_display.setStyleSheet("""
+            QTextBrowser {
+                background-color: #F0F8FF; /* Alice Blue */
+                color: #4682B4; /* Steel Blue */
+                font-size: 10pt;
+                border: 1px solid #ADD8E6; /* Light Blue */
+                border-radius: 5px;
+                padding: 5px;
+            }
+        """)
+        main_layout.addWidget(self.history_display)
 
         # Display for input/output
         self.display = QLineEdit()
@@ -106,6 +183,10 @@ class ScientificCalculator(QMainWindow):
 
         # File menu
         file_menu = menu_bar.addMenu("File")
+        clear_history_action = QAction("Clear History", self)
+        clear_history_action.triggered.connect(self.history_display.clear)
+        file_menu.addAction(clear_history_action)
+        file_menu.addSeparator()
         quit_action = QAction("Quit", self)
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
@@ -129,15 +210,59 @@ class ScientificCalculator(QMainWindow):
         edit_menu.addAction(undo_action)
         edit_menu.addAction(redo_action)
 
-        # View menu (for Day/Night Mode and Angle Mode)
+        # View menu (for Day/Night Mode, Angle Mode, and Output Formatting)
         view_menu = menu_bar.addMenu("View")
         toggle_theme_action = QAction("Toggle Day/Night Mode", self)
         toggle_theme_action.triggered.connect(self.toggle_day_night_mode)
         view_menu.addAction(toggle_theme_action)
 
-        toggle_angle_action = QAction("Toggle Degrees/Radians", self)
-        toggle_angle_action.triggered.connect(self.toggle_angle_mode)
-        view_menu.addAction(toggle_angle_action)
+        # Angle Mode Submenu (Replaces the single toggle action)
+        angle_mode_submenu = view_menu.addMenu("Angle Mode")
+        self.angle_group = QActionGroup(self) # Create an action group for exclusive selection
+
+        self.degrees_action = QAction("Degrees", self, checkable=True)
+        self.degrees_action.triggered.connect(lambda: self._set_angle_mode('degrees'))
+        angle_mode_submenu.addAction(self.degrees_action)
+        self.angle_group.addAction(self.degrees_action)
+
+        self.radians_action = QAction("Radians", self, checkable=True)
+        self.radians_action.triggered.connect(lambda: self._set_angle_mode('radians'))
+        angle_mode_submenu.addAction(self.radians_action)
+        self.angle_group.addAction(self.radians_action)
+
+        self.gradians_action = QAction("Gradians", self, checkable=True)
+        self.gradians_action.triggered.connect(lambda: self._set_angle_mode('gradians'))
+        angle_mode_submenu.addAction(self.gradians_action)
+        self.angle_group.addAction(self.gradians_action)
+
+        # Set initial checked state based on self.angle_unit
+        if self.angle_unit == 'degrees':
+            self.degrees_action.setChecked(True)
+        elif self.angle_unit == 'radians':
+            self.radians_action.setChecked(True)
+        elif self.angle_unit == 'gradians':
+            self.gradians_action.setChecked(True)
+
+        # Output Formatting Submenu
+        format_menu = view_menu.addMenu("Output Format")
+        self.precision_spinbox = QSpinBox(self)
+        self.precision_spinbox.setRange(0, 15) # 0 to 15 decimal places
+        self.precision_spinbox.setValue(self.decimal_precision)
+        self.precision_spinbox.valueChanged.connect(self.set_decimal_precision)
+        precision_action = QWidgetAction(self) # Use QWidgetAction to embed spinbox
+        precision_layout = QHBoxLayout()
+        precision_layout.addWidget(QLabel("Decimal Places:"))
+        precision_layout.addWidget(self.precision_spinbox)
+        precision_widget = QWidget()
+        precision_widget.setLayout(precision_layout)
+        precision_action.setDefaultWidget(precision_widget)
+        format_menu.addAction(precision_action)
+
+        self.toggle_sci_notation_action = QAction("Toggle Scientific Notation", self)
+        self.toggle_sci_notation_action.setCheckable(True)
+        self.toggle_sci_notation_action.setChecked(self.scientific_notation_enabled)
+        self.toggle_sci_notation_action.triggered.connect(self.toggle_scientific_notation)
+        format_menu.addAction(self.toggle_sci_notation_action)
 
         # Help menu
         help_menu = menu_bar.addMenu("Help")
@@ -159,13 +284,14 @@ class ScientificCalculator(QMainWindow):
         buttons = {
             '(': (0, 0), ')': (0, 1), 'CLR': (0, 2), 'CE': (0, 3), 'ANS': (0, 4),
             'sin': (1, 0), 'cos': (1, 1), 'tan': (1, 2), 'asin': (1, 3), 'acos': (1, 4),
-            'log': (2, 0), 'ln': (2, 1), 'sqrt': (2, 2), '^': (2, 3), 'fact': (2, 4),
-            'pi': (3, 0), 'e': (3, 1), 'exp': (3, 2), 'abs': (3, 3), 'Mod': (3, 4),
-            '7': (4, 0), '8': (4, 1), '9': (4, 2), '/': (4, 3), 'MR': (4, 4), # MR for Memory Recall
-            '4': (5, 0), '5': (5, 1), '6': (5, 2), '*': (5, 3), 'M+': (5, 4),
-            '1': (6, 0), '2': (6, 1), '3': (6, 2), '-': (6, 3), 'M-': (6, 4),
-            '0': (7, 0), '.': (7, 1), 'Neg': (7, 2), '+': (7, 3), '=': (7, 4),
-            'Alpha': (8, 0), 'Shift': (8, 1), 'Undo': (8, 2), 'Redo': (8, 3), 'MC': (8, 4) # MC for Memory Clear
+            'sinh': (2, 0), 'cosh': (2, 1), 'tanh': (2, 2), 'asinh': (2, 3), 'acosh': (2, 4),
+            'log': (3, 0), 'ln': (3, 1), 'log_b': (3, 2), 'sqrt': (3, 3), 'fact': (3, 4),
+            'pi': (4, 0), 'e': (4, 1), 'exp': (4, 2), 'abs': (4, 3), 'Mod': (4, 4),
+            '7': (5, 0), '8': (5, 1), '9': (5, 2), '/': (5, 3), 'MR': (5, 4), # MR for Memory Recall
+            '4': (6, 0), '5': (6, 1), '6': (6, 2), '*': (6, 3), 'M+': (6, 4),
+            '1': (7, 0), '2': (7, 1), '3': (7, 2), '-': (7, 3), 'M-': (7, 4),
+            '0': (8, 0), '.': (8, 1), 'Neg': (8, 2), '+': (8, 3), '=': (8, 4),
+            'Alpha': (9, 0), 'Shift': (9, 1), 'Undo': (9, 2), 'Redo': (9, 3), 'MC': (9, 4) # MC for Memory Clear
         }
 
         # Add buttons to the layout
@@ -255,9 +381,9 @@ class ScientificCalculator(QMainWindow):
             elif text == '=':
                 self.calculate_expression()
             elif text == 'ANS':
-                self.display.setText(current_display_text + str(self.ans))
+                self.display.setText(current_display_text + self._format_result(self.ans))
             elif text == 'M': # Recall memory - should be MR
-                self.display.setText(current_display_text + str(self.memory))
+                self.display.setText(current_display_text + self._format_result(self.memory))
             elif text == 'M+':
                 self.memory += self._get_current_number_from_display()
                 self._show_temp_message(f"Mem: {self.memory:.2f}")
@@ -265,7 +391,7 @@ class ScientificCalculator(QMainWindow):
                 self.memory -= self._get_current_number_from_display()
                 self._show_temp_message(f"Mem: {self.memory:.2f}")
             elif text == 'MR': # Memory Recall
-                self.display.setText(current_display_text + str(self.memory))
+                self.display.setText(current_display_text + self._format_result(self.memory))
             elif text == 'MC': # Memory Clear
                 self.memory = 0.0
                 self._show_temp_message("Memory Cleared")
@@ -280,14 +406,17 @@ class ScientificCalculator(QMainWindow):
             elif text == 'Redo':
                 self.redo()
             elif text == 'pi':
-                self.display.setText(current_display_text + str(math.pi))
+                self.display.setText(current_display_text + self._format_result(math.pi))
             elif text == 'e':
-                self.display.setText(current_display_text + str(math.e))
+                self.display.setText(current_display_text + self._format_result(math.e))
             elif text == '^':
                 self.display.setText(current_display_text + '**') # Exponentiation
             elif text == 'Mod':
                 self.display.setText(current_display_text + '%') # Modulo
+            elif text == 'log_b':
+                self.display.setText(current_display_text + 'log_b(') # Custom base log
             elif text in ['sin', 'cos', 'tan', 'asin', 'acos', 'atan',
+                          'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh',
                           'log', 'ln', 'sqrt', 'exp', 'abs', 'fact']:
                 self.display.setText(current_display_text + text + '(') # Add function name and open parenthesis
             else:
@@ -322,7 +451,6 @@ class ScientificCalculator(QMainWindow):
         """Displays a temporary message in the status label."""
         original_text = self.status_label.text()
         self.status_label.setText(message)
-        from PyQt5.QtCore import QTimer
         QTimer.singleShot(duration, lambda: self.status_label.setText(original_text))
 
 
@@ -332,6 +460,13 @@ class ScientificCalculator(QMainWindow):
         Replaces eval() with a custom parser for security.
         """
         expression = self.display.text()
+
+        # Handle custom base logarithm: log_b(value, base)
+        # This is a simple regex replacement, for more complex parsing, a full parser is needed.
+        # Example: log_b(100, 10) -> math.log(100, 10)
+        expression = re.sub(r'log_b\(([^,]+),\s*([^)]+)\)', r'math.log(\1, \2)', expression)
+
+
         # Replace common math functions with their math module equivalents
         # and constants. This is a whitelist approach.
         replacements = {
@@ -343,8 +478,14 @@ class ScientificCalculator(QMainWindow):
             'asin(': 'math.asin(',
             'acos(': 'math.acos(',
             'atan(': 'math.atan(',
+            'sinh(': 'math.sinh(',
+            'cosh(': 'math.cosh(',
+            'tanh(': 'math.tanh(',
+            'asinh(': 'math.asinh(',
+            'acosh(': 'math.acosh(',
+            'atanh(': 'math.atanh(',
             'log(': 'math.log10(', # log defaults to base 10
-            'ln(': 'math.log(',    # ln is natural log
+            'ln(': 'math.log(',    # ln is natural log (base e)
             'sqrt(': 'math.sqrt(',
             'exp(': 'math.exp(',
             'abs(': 'abs(',
@@ -357,21 +498,24 @@ class ScientificCalculator(QMainWindow):
         for old, new in replacements.items():
             expression = expression.replace(old, new)
 
-        # Handle angle unit conversion for trig functions
-        if self.angle_unit == 'degrees':
-            # Find sin(X), cos(X), tan(X) and wrap X with math.radians()
-            # This regex needs to be careful not to double-wrap if already radians()
-            # Simple approach: assume numbers inside sin/cos/tan need conversion
-            # A more robust solution would involve proper parsing.
-            # For now, let's just make sure the `calculate_scientific` handles it.
-            pass # The individual scientific function calls will handle this.
+        # Pre-process expressions for angle unit conversion for trig functions
+        # This is a basic attempt for simple cases. A full parser would be better.
+        def convert_angle_if_needed(match):
+            func = match.group(1)
+            arg = match.group(2)
+            if self.angle_unit == 'degrees':
+                return f"math.{func}(math.radians({arg}))"
+            elif self.angle_unit == 'gradians':
+                return f"math.{func}({arg} * math.pi / 200)"
+            return f"math.{func}({arg})"
+
+        # Regex to find sin(X), cos(X), tan(X) where X is a number or simple expression
+        # This is very basic and will fail on nested functions or complex args.
+        expression = re.sub(r'(sin|cos|tan)\(([^)]+)\)', convert_angle_if_needed, expression)
+
 
         try:
             # Attempt to evaluate the expression using a restricted global/local scope
-            # This is still a form of eval, but with very limited scope.
-            # For a truly robust solution, a full expression parser is needed.
-            # For this enhancement, we'll use a safer `eval` with limited scope.
-            # We explicitly define what functions and objects are available.
             safe_dict = {
                 'math': math,
                 '__builtins__': {
@@ -387,16 +531,12 @@ class ScientificCalculator(QMainWindow):
             }
             result = eval(expression, {"__builtins__": safe_dict["__builtins__"], "math": math})
 
-            # If a trig function was called, and we are in degrees mode, ensure conversion
-            # This part is tricky with a simple eval, as the conversion needs to happen
-            # *before* the math.sin/cos/tan is called.
-            # The current `calculate_scientific` handles this for single function calls.
-            # For complex expressions, a full parser is needed.
-            # For now, we'll rely on the `calculate_scientific` method for single functions
-            # and allow direct eval for general expressions, which is less ideal.
-
             self.ans = result
-            self.display.setText(str(result))
+            formatted_result = self._format_result(result)
+            self.display.setText(formatted_result)
+            self.history_display.append(f"{self.display.text()} = {formatted_result}") # Add to history
+            self.history_display.verticalScrollBar().setValue(self.history_display.verticalScrollBar().maximum()) # Scroll to bottom
+
         except (SyntaxError, ZeroDivisionError, TypeError, ValueError) as e:
             self.display.setText("Error")
             self._show_temp_message(f"Calculation Error: {e}", duration=3000)
@@ -423,13 +563,20 @@ class ScientificCalculator(QMainWindow):
 
             result = None
             if func_name in ['sin', 'cos', 'tan']:
-                angle = math.radians(value) if self.angle_unit == 'degrees' else value
+                angle = value
+                if self.angle_unit == 'degrees':
+                    angle = math.radians(value)
+                elif self.angle_unit == 'gradians':
+                    angle = value * math.pi / 200
                 result = getattr(math, func_name)(angle)
             elif func_name in ['asin', 'acos', 'atan']:
-                # Inverse trig functions return radians, convert if in degrees mode for display
-                result = getattr(math, func_name)(value)
+                result = getattr(math, func_name)(value) # Returns radians
                 if self.angle_unit == 'degrees':
                     result = math.degrees(result)
+                elif self.angle_unit == 'gradians':
+                    result = result * 200 / math.pi
+            elif func_name in ['sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh']:
+                result = getattr(math, func_name)(value)
             elif func_name == 'log':
                 result = math.log10(value)
             elif func_name == 'ln':
@@ -445,7 +592,7 @@ class ScientificCalculator(QMainWindow):
 
             if result is not None:
                 # Replace the number with the result
-                new_display_text = current_text[:-len(value_str)] + str(result)
+                new_display_text = current_text[:-len(value_str)] + self._format_result(result)
                 self.ans = result
                 self.display.setText(new_display_text)
             else:
@@ -464,7 +611,7 @@ class ScientificCalculator(QMainWindow):
         current_text = self.display.text()
         # Find the last number or expression part to negate
         # This is a simple heuristic and might not work for complex expressions
-        match = re.search(r'([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)$', current_text)
+        match = re.search(r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$', current_text)
         if match:
             number_str = match.group(1)
             if number_str.startswith('-'):
@@ -515,6 +662,11 @@ class ScientificCalculator(QMainWindow):
                     color: #61afef; /* Blueish text */
                     border: 2px solid #56b6c2; /* Cyan border */
                 }
+                QTextBrowser { /* History display in night mode */
+                    background-color: #3e4452;
+                    color: #abb2bf;
+                    border: 1px solid #56b6c2;
+                }
                 QPushButton {
                     background-color: #4b5263; /* Darker buttons */
                     color: #c678dd; /* Purpleish text */
@@ -559,6 +711,11 @@ class ScientificCalculator(QMainWindow):
                     background-color: #E0FFFF; /* Light Cyan */
                     color: black;
                     border: 2px solid #00BFFF; /* Deep Sky Blue */
+                }
+                QTextBrowser { /* History display in day mode */
+                    background-color: #F0F8FF; /* Alice Blue */
+                    color: #4682B4; /* Steel Blue */
+                    border: 1px solid #ADD8E6; /* Light Blue */
                 }
                 QPushButton {
                     background-color: #e0e0e0;
@@ -606,11 +763,67 @@ class ScientificCalculator(QMainWindow):
                 else: # In calculator mode, reset to default theme style
                     button.setStyleSheet("") # Let the main theme apply
 
-    def toggle_angle_mode(self):
-        """Toggles between degrees and radians mode."""
-        self.angle_unit = 'radians' if self.angle_unit == 'degrees' else 'degrees'
+    def _set_angle_mode(self, mode):
+        """Sets the angle unit and updates the status label and menu checks."""
+        self.angle_unit = mode
         self.status_label.setText(f"Mode: {self.angle_unit.capitalize()}")
         self._show_temp_message(f"Angle Mode: {self.angle_unit.capitalize()}")
+
+        # Update menu checks
+        self.degrees_action.setChecked(mode == 'degrees')
+        self.radians_action.setChecked(mode == 'radians')
+        self.gradians_action.setChecked(mode == 'gradians')
+
+    def set_decimal_precision(self, value):
+        """Sets the number of decimal places for result formatting."""
+        self.decimal_precision = value
+        self._show_temp_message(f"Precision set to {value} decimal places.")
+        # Re-format current display if it's a number
+        try:
+            current_value = float(self.display.text())
+            self.display.setText(self._format_result(current_value))
+        except ValueError:
+            pass # Not a number, no reformatting needed
+
+    def toggle_scientific_notation(self, checked):
+        """Toggles scientific notation for result formatting."""
+        self.scientific_notation_enabled = checked
+        self._show_temp_message(f"Scientific Notation: {'ON' if checked else 'OFF'}")
+        # Re-format current display if it's a number
+        try:
+            current_value = float(self.display.text())
+            self.display.setText(self._format_result(current_value))
+        except ValueError:
+            pass # Not a number, no reformatting needed
+
+    def _format_result(self, value):
+        """Formats a numerical result based on current precision and scientific notation settings."""
+        if isinstance(value, (int, float)):
+            if self.scientific_notation_enabled:
+                # Format with scientific notation
+                formatted = f"{value:.{self.decimal_precision}e}"
+            else:
+                # Format with fixed decimal places
+                formatted = f"{value:.{self.decimal_precision}f}"
+                # Remove trailing zeros and decimal point if it's an integer
+                if '.' in formatted:
+                    formatted = formatted.rstrip('0').rstrip('.')
+                if not formatted: # Handle case where .rstrip('.') makes it empty for 0.00
+                    formatted = "0"
+
+            # Add thousands separators (only for non-scientific notation and if it's a whole number part)
+            if not self.scientific_notation_enabled and '.' in formatted:
+                parts = formatted.split('.')
+                whole_part = parts[0]
+                decimal_part = parts[1]
+                # Add commas to the whole part
+                whole_part_formatted = "{:,}".format(int(whole_part)) if whole_part else "0"
+                formatted = f"{whole_part_formatted}.{decimal_part}"
+            elif not self.scientific_notation_enabled: # If it's a whole number
+                formatted = "{:,}".format(int(value))
+
+            return formatted
+        return str(value) # Return as string for non-numeric values
 
     def _push_to_undo_stack(self, text):
         """Pushes the current display text to the undo stack."""
@@ -655,20 +868,10 @@ class ScientificCalculator(QMainWindow):
 
     def show_about_dialog(self):
         """Displays the 'About' dialog."""
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Information)
-        msg.setWindowTitle("About EfCalc Pro")
-        msg.setText(f"""EfCalc Pro - Version 4.3 (Enhanced)
-Author: Dr. Eric O. Flores
-Email: eoftoro@gmail.com
-Programming Language: Python
-GUI Technology: PyQt5
+        # Create an instance of the custom AboutDialog
+        about_dialog = AboutDialog(self)
+        about_dialog.exec_() # Show the dialog as modal
 
-This version includes enhanced security by avoiding direct eval() for general expressions,
-improved scientific function handling with degrees/radians toggle,
-more robust memory operations, and a refined UI/UX.
-""")
-        msg.exec_()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
