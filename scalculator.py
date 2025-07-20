@@ -47,7 +47,6 @@ class AboutDialog(QDialog):
         pane1_layout = QVBoxLayout(pane1)
         pane1_layout.addWidget(QLabel("<b>EfCalc Pro - Version 4.3 (Enhanced)</b>"))
         pane1_layout.addWidget(QLabel("Author: Dr. Eric O. Flores"))
-        pane1_layout.addWidget(QLabel("Version 3")) # Updated version to 3
         pane1_layout.addWidget(QLabel("Revised July 20, 2025"))
         pane1_layout.addWidget(QLabel("Email: eoftoro@gmail.com"))
         pane1_layout.addStretch() # Push content to the top
