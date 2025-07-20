@@ -24,10 +24,62 @@ import re # Import re for more robust parsing
 
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton, QLineEdit,
-    QGridLayout, QMenuBar, QAction, QMessageBox, QMainWindow, QLabel
+    QGridLayout, QMenuBar, QAction, QMessageBox, QMainWindow, QLabel,
+    QDialog, QTabWidget, QTextBrowser # Added QDialog, QTabWidget, QTextBrowser
 )
 from PyQt5.QtGui import QIcon, QKeySequence
 from PyQt5.QtCore import Qt
+
+# Define a custom About dialog with tabs
+class AboutDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("About EfCalc Pro")
+        self.setFixedSize(400, 300) # Fixed size for the dialog
+
+        main_layout = QVBoxLayout(self)
+        tab_widget = QTabWidget()
+        main_layout.addWidget(tab_widget)
+
+        # Pane 1: General Information
+        pane1 = QWidget()
+        pane1_layout = QVBoxLayout(pane1)
+        pane1_layout.addWidget(QLabel("<b>EfCalc Pro - Version 4.3 (Enhanced)</b>"))
+        pane1_layout.addWidget(QLabel("Author: Dr. Eric O. Flores"))
+        pane1_layout.addWidget(QLabel("Version 2"))
+        pane1_layout.addWidget(QLabel("Revised July 20, 2025"))
+        pane1_layout.addWidget(QLabel("Email: eoftoro@gmail.com"))
+        pane1_layout.addStretch() # Push content to the top
+        tab_widget.addTab(pane1, "General Info")
+
+        # Pane 2: Technologies Used
+        pane2 = QWidget()
+        pane2_layout = QVBoxLayout(pane2)
+        pane2_layout.addWidget(QLabel("<b>Technologies Used:</b>"))
+        pane2_layout.addWidget(QLabel("Programming Language: Python"))
+        pane2_layout.addWidget(QLabel("GUI Technology: PyQt5"))
+        pane2_layout.addStretch()
+        tab_widget.addTab(pane2, "Technologies")
+
+        # Pane 3: Changes and Updates
+        pane3 = QWidget()
+        pane3_layout = QVBoxLayout(pane3)
+        pane3_layout.addWidget(QLabel("<b>Recent Enhancements:</b>"))
+        changes_text = QTextBrowser() # Using QTextBrowser for formatted text
+        changes_text.setReadOnly(True)
+        changes_text.setHtml("""
+            <ul>
+                <li>Enhanced security by avoiding direct <code>eval()</code> for general expressions.</li>
+                <li>Improved scientific function handling with degrees/radians toggle.</li>
+                <li>More robust memory operations (MR, MC).</li>
+                <li>Refined UI/UX with modern styling and day/night theme.</li>
+                <li>Added more scientific functions (asin, acos, atan, ln, fact, Mod).</li>
+                <li>Improved Undo/Redo functionality with better state tracking.</li>
+            </ul>
+        """)
+        pane3_layout.addWidget(changes_text)
+        tab_widget.addTab(pane3, "Updates")
+
 
 class ScientificCalculator(QMainWindow):
     """
@@ -655,20 +707,10 @@ class ScientificCalculator(QMainWindow):
 
     def show_about_dialog(self):
         """Displays the 'About' dialog."""
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Information)
-        msg.setWindowTitle("About EfCalc Pro")
-        msg.setText(f"""EfCalc Pro - Version 4.3 (Enhanced)
-Author: Dr. Eric O. Flores
-Email: eoftoro@gmail.com
-Programming Language: Python
-GUI Technology: PyQt5
+        # Create an instance of the custom AboutDialog
+        about_dialog = AboutDialog(self)
+        about_dialog.exec_() # Show the dialog as modal
 
-This version includes enhanced security by avoiding direct eval() for general expressions,
-improved scientific function handling with degrees/radians toggle,
-more robust memory operations, and a refined UI/UX.
-""")
-        msg.exec_()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
