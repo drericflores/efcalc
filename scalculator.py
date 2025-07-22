@@ -1,3 +1,13 @@
+"""
+A Scientific Calculator
+(c) 2024 Eric O. Flores
+GPL3 License Notice PyCalc Pro - A Python-based Scientific Calculator
+Copyright (C) 2024 Dr. Eric O. Flores – E-mail: eoftoro@gmail.com
+
+EfCalc Pro is a Python-based scientific calculator application designed for enhanced
+mathematical computations, featuring a graphical user interface (GUI) built with PyQt5.
+It aims to be a powerful tool for numerical evaluation of complex mathematical expressions.
+"""
 #
 # GPL3 License Notice
 # EfCalc Pro - A Python-based Scientific Calculator
@@ -26,10 +36,374 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton, QLineEdit,
     QGridLayout, QMenuBar, QAction, QMessageBox, QMainWindow, QLabel,
     QDialog, QTabWidget, QTextBrowser, QSpinBox, QHBoxLayout, QWidgetAction,
-    QActionGroup # Added QActionGroup for exclusive menu items
+    QActionGroup
 )
 from PyQt5.QtGui import QIcon, QKeySequence
-from PyQt5.QtCore import Qt, QTimer # Ensure QTimer is imported
+from PyQt5.QtCore import Qt, QTimer
+
+# --- Token Definitions ---
+TT_NUMBER = 'NUMBER'
+TT_PLUS = 'PLUS'
+TT_MINUS = 'MINUS'
+TT_MULTIPLY = 'MULTIPLY'
+TT_DIVIDE = 'DIVIDE'
+TT_MODULO = 'MODULO'
+TT_POWER = 'POWER' # For ^
+TT_LPAREN = 'LPAREN'
+TT_RPAREN = 'RPAREN'
+TT_IDENTIFIER = 'IDENTIFIER' # For function names like sin, cos, log
+TT_COMMA = 'COMMA' # For log_b(value, base)
+TT_EOF = 'EOF' # End of File/Input
+
+class Token:
+    def __init__(self, type, value=None):
+        self.type = type
+        self.value = value
+
+    def __repr__(self):
+        if self.value:
+            return f"Token({self.type}, {self.value})"
+        return f"Token({self.type})"
+
+# --- Tokenizer (Lexer) ---
+class Lexer:
+    def __init__(self, text):
+        self.text = text
+        self.pos = -1
+        self.current_char = None
+        self.advance()
+
+    def advance(self):
+        self.pos += 1
+        self.current_char = self.text[self.pos] if self.pos < len(self.text) else None
+
+    def make_number(self):
+        num_str = ''
+        dot_count = 0
+        while self.current_char is not None and (self.current_char.isdigit() or self.current_char == '.'):
+            if self.current_char == '.':
+                if dot_count == 1:
+                    break
+                dot_count += 1
+            num_str += self.current_char
+            self.advance()
+        try:
+            return Token(TT_NUMBER, float(num_str))
+        except ValueError:
+            raise Exception(f"Invalid number format: {num_str}")
+
+
+    def make_identifier(self):
+        id_str = ''
+        # Allow alphanumeric and underscore for identifiers
+        while self.current_char is not None and (self.current_char.isalnum() or self.current_char == '_'):
+            id_str += self.current_char
+            self.advance()
+        return Token(TT_IDENTIFIER, id_str)
+
+    def generate_tokens(self):
+        tokens = []
+        while self.current_char is not None:
+            if self.current_char in ' \t':
+                self.advance()
+            elif self.current_char.isdigit() or self.current_char == '.':
+                tokens.append(self.make_number())
+            elif self.current_char == '+':
+                tokens.append(Token(TT_PLUS))
+                self.advance()
+            elif self.current_char == '-':
+                tokens.append(Token(TT_MINUS))
+                self.advance()
+            elif self.current_char == '*':
+                tokens.append(Token(TT_MULTIPLY))
+                self.advance()
+            elif self.current_char == '/':
+                tokens.append(Token(TT_DIVIDE))
+                self.advance()
+            elif self.current_char == '%':
+                tokens.append(Token(TT_MODULO))
+                self.advance()
+            elif self.current_char == '^':
+                tokens.append(Token(TT_POWER))
+                self.advance()
+            elif self.current_char == '(':
+                tokens.append(Token(TT_LPAREN))
+                self.advance()
+            elif self.current_char == ')':
+                tokens.append(Token(TT_RPAREN))
+                self.advance()
+            elif self.current_char == ',':
+                tokens.append(Token(TT_COMMA))
+                self.advance()
+            elif self.current_char.isalpha():
+                tokens.append(self.make_identifier())
+            else:
+                raise Exception(f"Illegal character: '{self.current_char}' at position {self.pos}")
+        tokens.append(Token(TT_EOF))
+        return tokens
+
+# --- AST Nodes ---
+class ASTNode:
+    pass
+
+class NumberNode(ASTNode):
+    def __init__(self, token):
+        self.token = token
+        self.value = token.value
+
+    def __repr__(self):
+        return f"Number({self.value})"
+
+class BinOpNode(ASTNode):
+    def __init__(self, left, op_token, right):
+        self.left = left
+        self.op_token = op_token
+        self.right = right
+
+    def __repr__(self):
+        return f"({self.left} {self.op_token.type} {self.right})"
+
+class UnaryOpNode(ASTNode):
+    def __init__(self, op_token, operand):
+        self.op_token = op_token
+        self.operand = operand
+
+    def __repr__(self):
+        return f"({self.op_token.type} {self.operand})"
+
+class FunctionCallNode(ASTNode):
+    def __init__(self, identifier_token, args):
+        self.identifier_token = identifier_token
+        self.function_name = identifier_token.value
+        self.args = args # List of ASTNodes for arguments
+
+    def __repr__(self):
+        return f"Call({self.function_name}, {self.args})"
+
+class ConstantNode(ASTNode):
+    def __init__(self, identifier_token):
+        self.identifier_token = identifier_token
+        self.name = identifier_token.value
+
+    def __repr__(self):
+        return f"Constant({self.name})"
+
+# --- Parser ---
+class Parser:
+    def __init__(self, tokens):
+        self.tokens = tokens
+        self.token_idx = -1
+        self.current_token = None
+        self.advance()
+
+    def advance(self):
+        self.token_idx += 1
+        self.current_token = self.tokens[self.token_idx] if self.token_idx < len(self.tokens) else None
+
+    def parse(self):
+        if self.current_token.type == TT_EOF:
+            return None
+        node = self.expr()
+        if self.current_token.type != TT_EOF:
+            raise Exception(f"Invalid syntax: Extra tokens after expression starting with {self.current_token.type}")
+        return node
+
+    # Grammar rules (recursive descent with implicit multiplication)
+
+    def factor(self):
+        token = self.current_token
+
+        if token.type == TT_PLUS:
+            self.advance()
+            return UnaryOpNode(token, self.factor())
+        elif token.type == TT_MINUS:
+            self.advance()
+            return UnaryOpNode(token, self.factor())
+        elif token.type == TT_NUMBER:
+            self.advance()
+            return NumberNode(token)
+        elif token.type == TT_LPAREN:
+            self.advance()
+            expr = self.expr()
+            if self.current_token.type == TT_RPAREN:
+                self.advance()
+                return expr
+            else:
+                raise Exception("Invalid syntax: Expected ')'")
+        elif token.type == TT_IDENTIFIER:
+            identifier_token = token
+            self.advance()
+            if self.current_token.type == TT_LPAREN:
+                self.advance()
+                args = []
+                if self.current_token.type != TT_RPAREN:
+                    args.append(self.expr())
+                    while self.current_token.type == TT_COMMA:
+                        self.advance()
+                        args.append(self.expr())
+                if self.current_token.type == TT_RPAREN:
+                    self.advance()
+                    return FunctionCallNode(identifier_token, args)
+                else:
+                    raise Exception("Invalid syntax: Expected ')' for function call")
+            else:
+                return ConstantNode(identifier_token)
+        else:
+            raise Exception(f"Invalid syntax: Expected number, identifier, or '(' but got {token.type}")
+
+    def term(self):
+        left = self.factor()
+
+        # Handle implicit multiplication and standard multiplication/division/modulo
+        while self.current_token.type in (TT_MULTIPLY, TT_DIVIDE, TT_MODULO) or \
+              (isinstance(left, (NumberNode, ConstantNode, FunctionCallNode)) and self.current_token.type in (TT_LPAREN, TT_IDENTIFIER, TT_NUMBER)):
+
+            if self.current_token.type in (TT_MULTIPLY, TT_DIVIDE, TT_MODULO):
+                op_token = self.current_token
+                self.advance()
+                right = self.factor()
+            else: # Implicit multiplication
+                op_token = Token(TT_MULTIPLY, '*') # Create a synthetic multiplication token
+                right = self.factor() # The next factor is implicitly multiplied
+
+            left = BinOpNode(left, op_token, right)
+        return left
+
+    def power(self):
+        # Handles exponentiation from right to left (e.g., 2^3^2 = 2^(3^2))
+        left = self.term()
+        while self.current_token.type == TT_POWER:
+            op_token = self.current_token
+            self.advance()
+            right = self.power() # Recursive call for right-associativity
+            left = BinOpNode(left, op_token, right)
+        return left
+
+    def expr(self):
+        left = self.power()
+        while self.current_token.type in (TT_PLUS, TT_MINUS):
+            op_token = self.current_token
+            self.advance()
+            right = self.power()
+            left = BinOpNode(left, op_token, right)
+        return left
+
+# --- Interpreter (Evaluator) ---
+class Interpreter:
+    def __init__(self, angle_unit='degrees'):
+        self.angle_unit = angle_unit
+        self.functions = {
+            'sin': self._wrap_trig_func(math.sin),
+            'cos': self._wrap_trig_func(math.cos),
+            'tan': self._wrap_trig_func(math.tan),
+            'asin': self._wrap_inv_trig_func(math.asin),
+            'acos': self._wrap_inv_trig_func(math.acos),
+            'atan': self._wrap_inv_trig_func(math.atan),
+            'sinh': math.sinh,
+            'cosh': math.cosh,
+            'tanh': math.tanh,
+            'asinh': math.asinh,
+            'acosh': math.acosh,
+            'atanh': math.atanh,
+            'log': lambda x: math.log10(x),
+            'ln': lambda x: math.log(x),
+            'log_b': lambda val, base: math.log(val, base),
+            'sqrt': math.sqrt,
+            'exp': math.exp,
+            'abs': abs,
+            'fact': lambda x: math.factorial(int(x)) if x >= 0 and x == int(x) else self._raise_error("Factorial only for non-negative integers")
+        }
+        self.constants = {
+            'pi': math.pi,
+            'e': math.e,
+        }
+
+    def _raise_error(self, message):
+        # Helper to raise errors during evaluation
+        raise ValueError(message)
+
+    def _wrap_trig_func(self, func):
+        def wrapper(angle_val):
+            if self.angle_unit == 'degrees':
+                return func(math.radians(angle_val))
+            elif self.angle_unit == 'gradians':
+                return func(angle_val * math.pi / 200.0)
+            return func(angle_val)
+        return wrapper
+
+    def _wrap_inv_trig_func(self, func):
+        def wrapper(val):
+            result_radians = func(val)
+            if self.angle_unit == 'degrees':
+                return math.degrees(result_radians)
+            elif self.angle_unit == 'gradians':
+                return result_radians * 200.0 / math.pi
+            return result_radians
+        return wrapper
+
+    def visit(self, node):
+        if isinstance(node, NumberNode):
+            return node.value
+        elif isinstance(node, BinOpNode):
+            return self.visit_bin_op(node)
+        elif isinstance(node, UnaryOpNode):
+            return self.visit_unary_op(node)
+        elif isinstance(node, FunctionCallNode):
+            return self.visit_function_call(node)
+        elif isinstance(node, ConstantNode):
+            return self.visit_constant(node)
+        else:
+            raise Exception(f"No visit method for {type(node)}")
+
+    def visit_bin_op(self, node):
+        left_val = self.visit(node.left)
+        right_val = self.visit(node.right)
+
+        if node.op_token.type == TT_PLUS:
+            return left_val + right_val
+        elif node.op_token.type == TT_MINUS:
+            return left_val - right_val
+        elif node.op_token.type == TT_MULTIPLY:
+            return left_val * right_val
+        elif node.op_token.type == TT_DIVIDE:
+            if right_val == 0:
+                self._raise_error("Division by zero")
+            return left_val / right_val
+        elif node.op_token.type == TT_MODULO:
+            if right_val == 0:
+                self._raise_error("Modulo by zero")
+            return left_val % right_val
+        elif node.op_token.type == TT_POWER:
+            return left_val ** right_val
+
+    def visit_unary_op(self, node):
+        operand_val = self.visit(node.operand)
+        if node.op_token.type == TT_MINUS:
+            return -operand_val
+        elif node.op_token.type == TT_PLUS:
+            return operand_val
+
+    def visit_function_call(self, node):
+        func_name = node.function_name
+        if func_name not in self.functions:
+            self._raise_error(f"Unknown function: {func_name}")
+
+        args_evaluated = [self.visit(arg_node) for arg_node in node.args]
+
+        if func_name == 'log_b':
+            if len(args_evaluated) != 2:
+                self._raise_error(f"{func_name}() takes 2 arguments ({len(args_evaluated)} given)")
+            return self.functions[func_name](args_evaluated[0], args_evaluated[1])
+        else:
+            if len(args_evaluated) != 1:
+                self._raise_error(f"{func_name}() takes 1 argument ({len(args_evaluated)} given)")
+            return self.functions[func_name](args_evaluated[0])
+
+    def visit_constant(self, node):
+        const_name = node.name
+        if const_name not in self.constants:
+            self._raise_error(f"Unknown constant: {const_name}")
+        return self.constants[const_name]
 
 # Define a custom About dialog with tabs
 class AboutDialog(QDialog):
@@ -69,7 +443,7 @@ class AboutDialog(QDialog):
         changes_text.setReadOnly(True)
         changes_text.setHtml("""
             <ul>
-                <li>Enhanced security by avoiding direct <code>eval()</code> for general expressions.</li>
+                <li>Enhanced security by avoiding direct <code>eval()</code> for general expressions (now uses custom parser).</li>
                 <li>Improved scientific function handling with degrees/radians/gradians toggle.</li>
                 <li>More robust memory operations (MR, MC).</li>
                 <li>Refined UI/UX with modern styling and day/night theme.</li>
@@ -80,6 +454,7 @@ class AboutDialog(QDialog):
                 <li>Added toggle for scientific notation in results.</li>
                 <li>Added thousands separators for better readability of large numbers.</li>
                 <li><b>Angle mode selection now uses a dedicated submenu for Degrees, Radians, and Gradians.</b></li>
+                <li><b>Introduced full-fledged expression parser for complex math and implicit multiplication.</b></li>
             </ul>
         """)
         pane3_layout.addWidget(changes_text)
@@ -385,18 +760,36 @@ class ScientificCalculator(QMainWindow):
             elif text == 'M': # Recall memory - should be MR
                 self.display.setText(current_display_text + self._format_result(self.memory))
             elif text == 'M+':
-                self.memory += self._get_current_number_from_display()
-                self._show_temp_message(f"Mem: {self.memory:.2f}")
+                # For M+, M-, we should attempt to evaluate the current display as a number
+                # and add/subtract it from memory. Or, more robustly, evaluate the *entire*
+                # current expression to get the result before adding to memory.
+                # For simplicity here, we'll try to extract the last number.
+                try:
+                    value_to_add = float(self.display.text()) # Assume display holds the number
+                    self.memory += value_to_add
+                    self._show_temp_message(f"Mem: {self.memory:.2f}")
+                except ValueError:
+                    self._show_temp_message("Invalid number for M+")
             elif text == 'M-':
-                self.memory -= self._get_current_number_from_display()
-                self._show_temp_message(f"Mem: {self.memory:.2f}")
+                try:
+                    value_to_subtract = float(self.display.text()) # Assume display holds the number
+                    self.memory -= value_to_subtract
+                    self._show_temp_message(f"Mem: {self.memory:.2f}")
+                except ValueError:
+                    self._show_temp_message("Invalid number for M-")
             elif text == 'MR': # Memory Recall
                 self.display.setText(current_display_text + self._format_result(self.memory))
             elif text == 'MC': # Memory Clear
                 self.memory = 0.0
                 self._show_temp_message("Memory Cleared")
             elif text == 'Neg':
-                self.toggle_negative()
+                # This needs to be handled by the parser's unary minus if it's part of an expression,
+                # or a simple string manipulation for the last number if standalone.
+                # For simplicity with the new parser, direct insertion of '-' is better.
+                self.display.setText(current_display_text + '-')
+                # Alternatively, if you want to apply negation to the *last entered number*,
+                # a more complex regex or AST manipulation would be needed.
+                # The current toggle_negative is a basic string manipulator.
             elif text == 'Alpha':
                 self.toggle_alphabet_mode()
             elif text == 'Shift':
@@ -405,20 +798,18 @@ class ScientificCalculator(QMainWindow):
                 self.undo()
             elif text == 'Redo':
                 self.redo()
-            elif text == 'pi':
-                self.display.setText(current_display_text + self._format_result(math.pi))
-            elif text == 'e':
-                self.display.setText(current_display_text + self._format_result(math.e))
-            elif text == '^':
-                self.display.setText(current_display_text + '**') # Exponentiation
-            elif text == 'Mod':
-                self.display.setText(current_display_text + '%') # Modulo
-            elif text == 'log_b':
-                self.display.setText(current_display_text + 'log_b(') # Custom base log
             elif text in ['sin', 'cos', 'tan', 'asin', 'acos', 'atan',
                           'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh',
-                          'log', 'ln', 'sqrt', 'exp', 'abs', 'fact']:
-                self.display.setText(current_display_text + text + '(') # Add function name and open parenthesis
+                          'log', 'ln', 'log_b', 'sqrt', 'exp', 'abs', 'fact']:
+                # For functions, add the function name followed by an opening parenthesis
+                self.display.setText(current_display_text + text + '(')
+            elif text == 'pi' or text == 'e':
+                 # Insert constants as their string representation
+                self.display.setText(current_display_text + text)
+            elif text == '^':
+                self.display.setText(current_display_text + '^')
+            elif text == 'Mod':
+                self.display.setText(current_display_text + '%') # Modulo is '%' in parser
             else:
                 # For numbers, operators, and alphabet characters
                 self.display.setText(current_display_text + text)
@@ -431,7 +822,9 @@ class ScientificCalculator(QMainWindow):
             if self.display.text() != current_display_text:
                 self._push_to_undo_stack(self.display.text())
 
-
+    # The _get_current_number_from_display is less relevant with a full parser,
+    # as memory operations should ideally operate on a fully evaluated result or
+    # a parsed numerical input. Keeping it for M+ / M- for now as a simple heuristic.
     def _get_current_number_from_display(self):
         """
         Attempts to extract the last number entered into the display for memory operations.
@@ -453,179 +846,60 @@ class ScientificCalculator(QMainWindow):
         self.status_label.setText(message)
         QTimer.singleShot(duration, lambda: self.status_label.setText(original_text))
 
-
     def calculate_expression(self):
         """
-        Safely evaluates the mathematical expression in the display.
-        Replaces eval() with a custom parser for security.
+        Calculates the mathematical expression in the display using the custom
+        tokenizer, parser, and interpreter.
         """
         expression = self.display.text()
 
-        # Handle custom base logarithm: log_b(value, base)
-        # This is a simple regex replacement, for more complex parsing, a full parser is needed.
-        # Example: log_b(100, 10) -> math.log(100, 10)
-        expression = re.sub(r'log_b\(([^,]+),\s*([^)]+)\)', r'math.log(\1, \2)', expression)
-
-
-        # Replace common math functions with their math module equivalents
-        # and constants. This is a whitelist approach.
-        replacements = {
-            'pi': str(math.pi),
-            'e': str(math.e),
-            'sin(': 'math.sin(',
-            'cos(': 'math.cos(',
-            'tan(': 'math.tan(',
-            'asin(': 'math.asin(',
-            'acos(': 'math.acos(',
-            'atan(': 'math.atan(',
-            'sinh(': 'math.sinh(',
-            'cosh(': 'math.cosh(',
-            'tanh(': 'math.tanh(',
-            'asinh(': 'math.asinh(',
-            'acosh(': 'math.acosh(',
-            'atanh(': 'math.atanh(',
-            'log(': 'math.log10(', # log defaults to base 10
-            'ln(': 'math.log(',    # ln is natural log (base e)
-            'sqrt(': 'math.sqrt(',
-            'exp(': 'math.exp(',
-            'abs(': 'abs(',
-            'fact(': 'math.factorial(',
-            '^': '**', # Python's exponentiation operator
-            'Mod': '%' # Modulo operator
-        }
-
-        # Apply replacements
-        for old, new in replacements.items():
-            expression = expression.replace(old, new)
-
-        # Pre-process expressions for angle unit conversion for trig functions
-        # This is a basic attempt for simple cases. A full parser would be better.
-        def convert_angle_if_needed(match):
-            func = match.group(1)
-            arg = match.group(2)
-            if self.angle_unit == 'degrees':
-                return f"math.{func}(math.radians({arg}))"
-            elif self.angle_unit == 'gradians':
-                return f"math.{func}({arg} * math.pi / 200)"
-            return f"math.{func}({arg})"
-
-        # Regex to find sin(X), cos(X), tan(X) where X is a number or simple expression
-        # This is very basic and will fail on nested functions or complex args.
-        expression = re.sub(r'(sin|cos|tan)\(([^)]+)\)', convert_angle_if_needed, expression)
-
+        if not expression:
+            self._show_temp_message("Enter an expression")
+            return
 
         try:
-            # Attempt to evaluate the expression using a restricted global/local scope
-            safe_dict = {
-                'math': math,
-                '__builtins__': {
-                    'abs': abs,
-                    'round': round,
-                    'int': int,
-                    'float': float,
-                    'str': str,
-                    'True': True,
-                    'False': False,
-                    'None': None
-                }
-            }
-            result = eval(expression, {"__builtins__": safe_dict["__builtins__"], "math": math})
+            lexer = Lexer(expression)
+            tokens = lexer.generate_tokens()
+            parser = Parser(tokens)
+            ast = parser.parse()
+            interpreter = Interpreter(angle_unit=self.angle_unit)
+            
+            result = interpreter.visit(ast)
 
             self.ans = result
             formatted_result = self._format_result(result)
             self.display.setText(formatted_result)
-            self.history_display.append(f"{self.display.text()} = {formatted_result}") # Add to history
-            self.history_display.verticalScrollBar().setValue(self.history_display.verticalScrollBar().maximum()) # Scroll to bottom
+            self.history_display.append(f"{expression} = {formatted_result}") # Use original expression
+            self.history_display.verticalScrollBar().setValue(self.history_display.verticalScrollBar().maximum())
 
-        except (SyntaxError, ZeroDivisionError, TypeError, ValueError) as e:
+        except (ZeroDivisionError, ValueError, AttributeError, TypeError, IndexError) as e:
             self.display.setText("Error")
             self._show_temp_message(f"Calculation Error: {e}", duration=3000)
         except Exception as e:
             self.display.setText("Error")
             self._show_temp_message(f"Unexpected Error: {e}", duration=3000)
 
-
-    def calculate_scientific(self, func_name):
-        """
-        Helper function to calculate trigonometric or scientific functions
-        when they are applied to the *current* display value.
-        This is used when a scientific button is pressed directly on a number.
-        """
-        current_text = self.display.text()
-        try:
-            # Try to parse the last number in the display
-            match = re.findall(r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$', current_text)
-            if not match:
-                raise ValueError("No number found to apply function.")
-
-            value_str = match[-1]
-            value = float(value_str)
-
-            result = None
-            if func_name in ['sin', 'cos', 'tan']:
-                angle = value
-                if self.angle_unit == 'degrees':
-                    angle = math.radians(value)
-                elif self.angle_unit == 'gradians':
-                    angle = value * math.pi / 200
-                result = getattr(math, func_name)(angle)
-            elif func_name in ['asin', 'acos', 'atan']:
-                result = getattr(math, func_name)(value) # Returns radians
-                if self.angle_unit == 'degrees':
-                    result = math.degrees(result)
-                elif self.angle_unit == 'gradians':
-                    result = result * 200 / math.pi
-            elif func_name in ['sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh']:
-                result = getattr(math, func_name)(value)
-            elif func_name == 'log':
-                result = math.log10(value)
-            elif func_name == 'ln':
-                result = math.log(value) # Natural logarithm
-            elif func_name == 'sqrt':
-                result = math.sqrt(value)
-            elif func_name == 'exp':
-                result = math.exp(value)
-            elif func_name == 'abs':
-                result = abs(value)
-            elif func_name == 'fact':
-                result = math.factorial(int(value)) # Factorial only for integers
-
-            if result is not None:
-                # Replace the number with the result
-                new_display_text = current_text[:-len(value_str)] + self._format_result(result)
-                self.ans = result
-                self.display.setText(new_display_text)
-            else:
-                raise ValueError("Function not recognized or not applicable.")
-
-        except (ValueError, TypeError, ZeroDivisionError) as e:
-            self.display.setText("Error")
-            self._show_temp_message(f"Function Error: {e}", duration=3000)
-        except Exception as e:
-            self.display.setText("Error")
-            self._show_temp_message(f"Unexpected Error in scientific: {e}", duration=3000)
-
+    # The calculate_scientific method is no longer needed as the full parser
+    # handles all scientific function evaluations within the main calculate_expression.
+    # def calculate_scientific(self, func_name):
+    #     pass # This method is now redundant and can be removed or left as a placeholder
 
     def toggle_negative(self):
-        """Toggle negative sign for the current number in the display."""
+        """
+        Toggles negative sign for the entire current display content if it represents a single number.
+        If it's an expression, this will simply prepend/remove a minus sign, which might not be
+        the desired behavior for complex expressions. A more advanced approach would involve
+        AST manipulation or attempting to negate the *last* numerical input.
+        For now, simply adding/removing a leading minus sign.
+        """
         current_text = self.display.text()
-        # Find the last number or expression part to negate
-        # This is a simple heuristic and might not work for complex expressions
-        match = re.search(r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$', current_text)
-        if match:
-            number_str = match.group(1)
-            if number_str.startswith('-'):
-                new_number_str = number_str[1:]
-            elif number_str.startswith('+'):
-                new_number_str = number_str[1:] # Remove explicit positive sign
-            else:
-                new_number_str = '-' + number_str
-            self.display.setText(current_text[:-len(number_str)] + new_number_str)
-        elif current_text and not current_text.endswith(tuple('+-*/%^')): # If display is not empty and doesn't end with operator
-            if current_text.startswith('-'):
-                self.display.setText(current_text[1:])
-            else:
-                self.display.setText('-' + current_text)
+        if not current_text:
+            return
+        
+        if current_text.startswith('-'):
+            self.display.setText(current_text[1:])
+        else:
+            self.display.setText('-' + current_text)
 
 
     def toggle_shift_mode(self):
@@ -780,7 +1054,7 @@ class ScientificCalculator(QMainWindow):
         self._show_temp_message(f"Precision set to {value} decimal places.")
         # Re-format current display if it's a number
         try:
-            current_value = float(self.display.text())
+            current_value = float(self.display.text().replace(',', '')) # Remove thousands separators for conversion
             self.display.setText(self._format_result(current_value))
         except ValueError:
             pass # Not a number, no reformatting needed
@@ -791,7 +1065,7 @@ class ScientificCalculator(QMainWindow):
         self._show_temp_message(f"Scientific Notation: {'ON' if checked else 'OFF'}")
         # Re-format current display if it's a number
         try:
-            current_value = float(self.display.text())
+            current_value = float(self.display.text().replace(',', '')) # Remove thousands separators for conversion
             self.display.setText(self._format_result(current_value))
         except ValueError:
             pass # Not a number, no reformatting needed
@@ -807,21 +1081,29 @@ class ScientificCalculator(QMainWindow):
                 formatted = f"{value:.{self.decimal_precision}f}"
                 # Remove trailing zeros and decimal point if it's an integer
                 if '.' in formatted:
-                    formatted = formatted.rstrip('0').rstrip('.')
+                    formatted = formatted.rstrip('0')
+                    if formatted.endswith('.'): # Remove if only decimal point remains
+                        formatted = formatted.rstrip('.')
                 if not formatted: # Handle case where .rstrip('.') makes it empty for 0.00
                     formatted = "0"
 
             # Add thousands separators (only for non-scientific notation and if it's a whole number part)
-            if not self.scientific_notation_enabled and '.' in formatted:
-                parts = formatted.split('.')
-                whole_part = parts[0]
-                decimal_part = parts[1]
-                # Add commas to the whole part
-                whole_part_formatted = "{:,}".format(int(whole_part)) if whole_part else "0"
-                formatted = f"{whole_part_formatted}.{decimal_part}"
-            elif not self.scientific_notation_enabled: # If it's a whole number
-                formatted = "{:,}".format(int(value))
-
+            if not self.scientific_notation_enabled:
+                if '.' in formatted:
+                    parts = formatted.split('.')
+                    whole_part = parts[0]
+                    decimal_part = parts[1]
+                    # Add commas to the whole part
+                    try:
+                        whole_part_formatted = "{:,}".format(int(whole_part))
+                    except ValueError: # Handle cases like just ".5"
+                        whole_part_formatted = whole_part
+                    formatted = f"{whole_part_formatted}.{decimal_part}"
+                else: # If it's a whole number
+                    try:
+                        formatted = "{:,}".format(int(value))
+                    except ValueError: # Handle very large/small numbers that might not convert to int cleanly
+                        formatted = str(value)
             return formatted
         return str(value) # Return as string for non-numeric values
 
