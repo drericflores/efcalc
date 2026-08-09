@@ -1,0 +1,12 @@
+Package: efcalc-pro
+Version: 5.0.0~rc1
+Section: science
+Priority: optional
+Architecture: all
+Depends: python3 (>= 3.10), python3-pyqt6
+Maintainer: Dr. Eric O. Flores <eoftoro@gmail.com>
+Homepage: https://github.com/drericflores/efcalc
+Description: Scientific and programmable calculator for Linux
+ EfCalc Pro provides scientific calculations, variables, reusable formulas,
+ conditionals, bounded loops, persistent history, and EFP program files in a
+ native Qt6 graphical interface.

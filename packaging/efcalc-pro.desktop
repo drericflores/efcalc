@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=EfCalc Pro
+GenericName=Scientific and Programmable Calculator
+Comment=Perform scientific calculations and run safe EfCalc programs
+Exec=efcalc-pro
+Icon=efcalc-pro
+Terminal=false
+Categories=Utility;Science;Calculator;
+Keywords=calculator;scientific;mathematics;programming;engineering;
+StartupNotify=true

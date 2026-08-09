@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.drericflores.efcalc</id>
+  <name>EfCalc Pro</name>
+  <summary>Scientific and programmable calculator for Linux</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>
+      EfCalc Pro combines a scientific calculator, an alphanumeric expression
+      keypad, and a safe programmable calculator with variables, formulas,
+      conditionals, bounded loops, and reusable EFP program files.
+    </p>
+  </description>
+  <launchable type="desktop-id">efcalc-pro.desktop</launchable>
+  <url type="homepage">https://github.com/drericflores/efcalc</url>
+  <developer id="io.github.drericflores">
+    <name>Dr. Eric O. Flores</name>
+  </developer>
+  <releases>
+    <release version="5.0.0-rc1" date="2026-08-09"/>
+  </releases>
+  <categories>
+    <category>Utility</category>
+    <category>Science</category>
+  </categories>
+</component>

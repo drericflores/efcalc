@@ -1,0 +1,7 @@
+# EfCalc Pro 5.0.0 example
+# Calculate electrical power from voltage and current.
+
+voltage := 12.5
+current := 2
+power := voltage * current
+print(power)

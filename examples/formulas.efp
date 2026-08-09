@@ -1,0 +1,7 @@
+# EfCalc Pro 5.0.0 Phase 3C example
+
+formula power(voltage, current) := voltage*current
+formula circle_area(radius) := pi*radius^2
+
+print(power(12.5, 2))
+print(circle_area(3))

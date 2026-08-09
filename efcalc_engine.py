@@ -216,7 +216,10 @@ class Parser:
 
 
 class Interpreter:
-    def __init__(self, angle_unit="degrees", ans=0.0):
+    def __init__(
+        self, angle_unit="degrees", ans=0.0, variables=None,
+        user_functions=None,
+    ):
         if angle_unit not in ("degrees", "radians", "gradians"):
             raise ValueError(f"Unsupported angle unit: {angle_unit}")
         self.angle_unit = angle_unit
@@ -230,14 +233,23 @@ class Interpreter:
             "log", "ln", "log_b", "sqrt", "exp", "abs", "fact",
         })
         self.constants = {"pi": math.pi, "e": math.e, "ans": ans}
+        self.variables = {
+            str(name).lower(): value for name, value in (variables or {}).items()
+        }
+        self.user_functions = {
+            str(name).lower(): function
+            for name, function in (user_functions or {}).items()
+        }
 
     def visit(self, node):
         if isinstance(node, NumberNode):
             return node.value
         if isinstance(node, ConstantNode):
-            if node.name not in self.constants:
-                raise CalcError(f"Unknown constant: {node.name}")
-            return self.constants[node.name]
+            if node.name in self.constants:
+                return self.constants[node.name]
+            if node.name in self.variables:
+                return self.variables[node.name]
+            raise CalcError(f"Unknown constant or variable: {node.name}")
         if isinstance(node, UnaryNode):
             value = self.visit(node.operand)
             return -value if node.operator == MINUS else value
@@ -279,6 +291,15 @@ class Interpreter:
 
     def _function(self, node):
         values = [self.visit(argument) for argument in node.arguments]
+        if node.name in self.user_functions:
+            try:
+                return self.user_functions[node.name](*values)
+            except CalcError:
+                raise
+            except TypeError as error:
+                raise CalcError(
+                    f"Invalid arguments for formula '{node.name}'"
+                ) from error
         expected = 2 if node.name == "log_b" else 1
         if len(values) != expected:
             raise CalcError(f"Function '{node.name}' requires {expected} argument(s)")
@@ -353,8 +374,14 @@ class Interpreter:
         return math.log(value, base)
 
 
-def evaluate(expression, angle_unit="degrees", ans=0.0):
+def evaluate(
+    expression, angle_unit="degrees", ans=0.0, variables=None,
+    user_functions=None,
+):
     """Evaluate one EfCalc expression without importing the GUI."""
     tokens = Lexer(expression).generate_tokens()
     tree = Parser(tokens).parse()
-    return Interpreter(angle_unit=angle_unit, ans=ans).visit(tree)
+    return Interpreter(
+        angle_unit=angle_unit, ans=ans, variables=variables,
+        user_functions=user_functions,
+    ).visit(tree)

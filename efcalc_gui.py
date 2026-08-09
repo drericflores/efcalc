@@ -5,19 +5,23 @@ import math
 from urllib.parse import quote, unquote
 
 from PyQt6.QtCore import Qt, QTimer, QUrl
-from PyQt6.QtGui import QAction, QActionGroup, QKeySequence
+from PyQt6.QtGui import (
+    QAction, QActionGroup, QCloseEvent, QKeySequence, QShortcut, QTextCursor,
+)
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QMainWindow, QMenu, QPushButton, QSpinBox, QTabWidget, QTextBrowser,
-    QVBoxLayout, QWidget, QWidgetAction,
+    QApplication, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QLabel,
+    QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
+    QSpinBox, QSplitter, QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
+    QWidgetAction,
 )
 
 from efcalc_engine import CalcError, Interpreter, Lexer, Parser
+from efcalc_program import ProgramError, ProgramInterpreter, ProgramStopped
 from efcalc_settings import CalculatorSettings
 
 
 APP_NAME = "EfCalc Pro"
-APP_VERSION = "5.0.0-dev2"
+APP_VERSION = "5.0.0-dev5"
 
 
 class AboutDialog(QDialog):
@@ -48,9 +52,245 @@ class AboutDialog(QDialog):
               <li>Persistent theme and calculation preferences.</li>
               <li>Native keyboard editing, Undo, and Redo.</li>
               <li>Improved history, memory, and error handling.</li>
+              <li>Programmable mode with variables, formulas, and .efp files.</li>
+              <li>Program symbols shared with the main calculator.</li>
             </ul>
         """)
         tabs.addTab(changes, "Changes")
+
+
+class ProgramDialog(QDialog):
+    SAMPLE_PROGRAM = """# EfCalc Pro program
+voltage := 12.5
+current := 2
+power := voltage * current
+if power >= 25
+    print(power)
+else
+    print(0)
+end
+"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("EfCalc Program Editor")
+        self.resize(760, 620)
+        self.current_path = None
+        self.variables = {}
+        self.formulas = {}
+        self.stop_requested = False
+        self._build_interface()
+
+    def _build_interface(self):
+        layout = QVBoxLayout(self)
+        toolbar = QHBoxLayout()
+        actions = (
+            ("New", self.new_program), ("Open", self.open_program),
+            ("Save", self.save_program), ("Save As", self.save_program_as),
+            ("Run", self.run_program), ("Stop", self.stop_program),
+            ("Clear Output", lambda: self.output.clear()),
+        )
+        for label, callback in actions:
+            button = QPushButton(label)
+            button.clicked.connect(callback)
+            if label == "Run":
+                self.run_button = button
+            elif label == "Stop":
+                self.stop_button = button
+                button.setEnabled(False)
+            toolbar.addWidget(button)
+        layout.addLayout(toolbar)
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        self.editor = QPlainTextEdit()
+        self.editor.setPlaceholderText("Enter an EfCalc program")
+        self.editor.setPlainText(self.SAMPLE_PROGRAM)
+        self.editor.document().setModified(False)
+        self.editor.document().modificationChanged.connect(self._update_title)
+        self.output = QPlainTextEdit()
+        self.output.setReadOnly(True)
+        self.output.setPlaceholderText("Program output")
+        self.symbols = QPlainTextEdit()
+        self.symbols.setReadOnly(True)
+        self.symbols.setPlaceholderText("Variables and formulas")
+        splitter.addWidget(self.editor)
+        splitter.addWidget(self.output)
+        splitter.addWidget(self.symbols)
+        splitter.setSizes([360, 140, 120])
+        layout.addWidget(splitter)
+
+        self.status = QLabel("Ready | .efp program format")
+        layout.addWidget(self.status)
+        self._update_title()
+
+    def new_program(self):
+        if not self.maybe_save():
+            return
+        self.editor.clear()
+        self.output.clear()
+        self.variables.clear()
+        self.formulas.clear()
+        self.symbols.clear()
+        self.current_path = None
+        self.editor.document().setModified(False)
+        self._update_title()
+        self.status.setText("New program")
+
+    def open_program(self):
+        if not self.maybe_save():
+            return
+        path, _selected_filter = QFileDialog.getOpenFileName(
+            self, "Open EfCalc Program", "", "EfCalc Programs (*.efp);;All Files (*)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as program_file:
+                self.editor.setPlainText(program_file.read())
+            self.current_path = path
+            self.editor.document().setModified(False)
+            self._update_title()
+            self.status.setText(f"Opened: {path}")
+        except OSError as error:
+            QMessageBox.critical(self, "Open Failed", str(error))
+
+    def save_program(self):
+        if not self.current_path:
+            return self.save_program_as()
+        return self._write_program(self.current_path)
+
+    def save_program_as(self):
+        path, _selected_filter = QFileDialog.getSaveFileName(
+            self, "Save EfCalc Program", "program.efp", "EfCalc Programs (*.efp)"
+        )
+        if not path:
+            return False
+        if not path.lower().endswith(".efp"):
+            path += ".efp"
+        if self._write_program(path):
+            self.current_path = path
+            self._update_title()
+            return True
+        return False
+
+    def _write_program(self, path):
+        try:
+            with open(path, "w", encoding="utf-8") as program_file:
+                program_file.write(self.editor.toPlainText())
+            self.status.setText(f"Saved: {path}")
+            self.editor.document().setModified(False)
+            self._update_title()
+            return True
+        except OSError as error:
+            QMessageBox.critical(self, "Save Failed", str(error))
+            return False
+
+    def run_program(self):
+        self.output.clear()
+        self.stop_requested = False
+        self.run_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+        calculator = self.parent()
+        try:
+            interpreter = ProgramInterpreter(
+                angle_unit=calculator.angle_unit,
+                initial_variables=self.variables,
+                initial_formulas=self.formulas,
+                ans=calculator.ans,
+                stop_requested=lambda: self.stop_requested,
+                progress_callback=self._program_progress,
+            )
+            result = interpreter.run(self.editor.toPlainText())
+            self.variables = result.variables
+            self.formulas = result.formulas
+            calculator.ans = result.last_result
+            calculator.update_program_symbols(
+                self.variables, self.formulas, result.last_result
+            )
+            if result.output:
+                self.output.setPlainText("\n".join(result.output))
+            else:
+                self.output.setPlainText("Program completed without output.")
+            variable_count = len(result.variables)
+            formula_count = len(result.formulas)
+            self._show_symbols(result)
+            self.status.setText(
+                f"Completed | {variable_count} variable(s) | "
+                f"{formula_count} formula(s)"
+            )
+        except ProgramError as error:
+            self.output.setPlainText(f"ERROR: {error}")
+            self.status.setText("Program stopped")
+            self._select_error_line(error.line_number)
+        except ProgramStopped:
+            self.output.appendPlainText("Program stopped by operator.")
+            self.status.setText("Program stopped")
+        finally:
+            self.run_button.setEnabled(True)
+            self.stop_button.setEnabled(False)
+
+    def stop_program(self):
+        self.stop_requested = True
+        self.status.setText("Stopping program...")
+
+    def _program_progress(self, line_number):
+        self.status.setText(f"Running line {line_number}")
+        QApplication.processEvents()
+
+    def _select_error_line(self, line_number):
+        cursor = self.editor.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        for _index in range(max(0, line_number - 1)):
+            cursor.movePosition(QTextCursor.MoveOperation.Down)
+        cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+        self.editor.setTextCursor(cursor)
+        self.editor.setFocus()
+
+    def _show_symbols(self, result):
+        lines = ["VARIABLES"]
+        if result.variables:
+            for name in sorted(result.variables):
+                lines.append(f"{name} = {result.variables[name]}")
+        else:
+            lines.append("(none)")
+        lines.extend(("", "FORMULAS"))
+        if result.formulas:
+            for name in sorted(result.formulas):
+                formula = result.formulas[name]
+                parameters = ", ".join(formula.parameters)
+                lines.append(f"{name}({parameters}) := {formula.expression}")
+        else:
+            lines.append("(none)")
+        self.symbols.setPlainText("\n".join(lines))
+
+    def _update_title(self, _modified=None):
+        name = self.current_path or "Untitled.efp"
+        marker = " *" if self.editor.document().isModified() else ""
+        self.setWindowTitle(f"EfCalc Program Editor — {name}{marker}")
+
+    def maybe_save(self):
+        if not self.editor.document().isModified():
+            return True
+        response = QMessageBox.warning(
+            self,
+            "Unsaved Program",
+            "The current EfCalc program has unsaved changes.",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        if response == QMessageBox.StandardButton.Save:
+            return bool(self.save_program())
+        if response == QMessageBox.StandardButton.Cancel:
+            return False
+        return True
+
+    def closeEvent(self, event: QCloseEvent):
+        if self.maybe_save():
+            event.accept()
+        else:
+            event.ignore()
 
 
 class ScientificCalculator(QMainWindow):
@@ -75,9 +315,12 @@ class ScientificCalculator(QMainWindow):
         self.theme = self.settings.theme
         self.memory = 0.0
         self.ans = 0.0
+        self.program_variables = {}
+        self.program_formulas = {}
         self.alpha_mode = False
         self.shift_mode = False
         self.interpreter = Interpreter(self.angle_unit, self.ans)
+        self.program_dialog = None
         self._status_timer = QTimer(self)
         self._status_timer.setSingleShot(True)
         self._status_timer.timeout.connect(self._restore_mode_status)
@@ -86,7 +329,12 @@ class ScientificCalculator(QMainWindow):
         self.setMinimumSize(470, 680)
         self._build_interface()
         self._build_menus()
+        self._build_shortcuts()
         self.apply_theme()
+        self._load_history()
+        geometry = self.settings.window_geometry
+        if geometry is not None:
+            self.restoreGeometry(geometry)
         self._restore_mode_status()
 
     def _build_interface(self):
@@ -98,7 +346,7 @@ class ScientificCalculator(QMainWindow):
         self.history_display.setObjectName("history")
         self.history_display.setMaximumHeight(120)
         self.history_display.setOpenExternalLinks(False)
-        self.history_display.anchorClicked.connect(self._load_history)
+        self.history_display.anchorClicked.connect(self._history_link_clicked)
         layout.addWidget(self.history_display)
 
         self.display = QLineEdit()
@@ -167,7 +415,7 @@ class ScientificCalculator(QMainWindow):
     def _build_menus(self):
         file_menu = self.menuBar().addMenu("File")
         clear_history = QAction("Clear History", self)
-        clear_history.triggered.connect(self.history_display.clear)
+        clear_history.triggered.connect(self.clear_history)
         file_menu.addAction(clear_history)
         file_menu.addSeparator()
         quit_action = QAction("Quit", self)
@@ -216,10 +464,25 @@ class ScientificCalculator(QMainWindow):
         scientific.toggled.connect(self._set_scientific_notation)
         format_menu.addAction(scientific)
 
+        program_menu = self.menuBar().addMenu("Program")
+        editor_action = QAction("Program Editor", self)
+        editor_action.setShortcut("Ctrl+Shift+P")
+        editor_action.triggered.connect(self._show_program_editor)
+        program_menu.addAction(editor_action)
+        clear_symbols = QAction("Clear Program Symbols", self)
+        clear_symbols.triggered.connect(self.clear_program_symbols)
+        program_menu.addAction(clear_symbols)
+
         help_menu = self.menuBar().addMenu("Help")
         about = QAction("About EfCalc Pro", self)
         about.triggered.connect(self._show_about)
         help_menu.addAction(about)
+
+    def _build_shortcuts(self):
+        clear_shortcut = QShortcut(QKeySequence("Esc"), self)
+        clear_shortcut.activated.connect(self.display.clear)
+        about_shortcut = QShortcut(QKeySequence("F1"), self)
+        about_shortcut.activated.connect(self._show_about)
 
     def _add_edit_action(self, menu: QMenu, label, shortcut, callback):
         action = QAction(label, self)
@@ -303,14 +566,21 @@ class ScientificCalculator(QMainWindow):
             self._show_status("Enter an expression")
             return None
         try:
-            tree = Parser(Lexer(expression).generate_tokens()).parse()
-            result = Interpreter(self.angle_unit, self.ans).visit(tree)
+            if self.program_variables or self.program_formulas:
+                session = ProgramInterpreter(
+                    angle_unit=self.angle_unit,
+                    initial_variables=self.program_variables,
+                    initial_formulas=self.program_formulas,
+                    ans=self.ans,
+                )
+                result = session.evaluate_expression(expression)
+            else:
+                tree = Parser(Lexer(expression).generate_tokens()).parse()
+                result = Interpreter(self.angle_unit, self.ans).visit(tree)
             if set_answer:
                 self.ans = result
                 formatted = self._format_result(result)
-                href = quote(expression, safe="")
-                label = html.escape(f"{expression} = {formatted}")
-                self.history_display.append(f'<a href="{href}" style="text-decoration:none;color:inherit">{label}</a>')
+                self._add_history(expression, formatted)
                 self.display.setText(formatted)
             return result
         except CalcError as error:
@@ -344,10 +614,39 @@ class ScientificCalculator(QMainWindow):
         self.memory = 0.0
         self._show_status("Memory cleared")
 
-    def _load_history(self, url: QUrl):
+    def _history_link_clicked(self, url: QUrl):
         self.display.setText(unquote(url.toString()))
         self.display.setFocus()
         self._show_status("Loaded from history")
+
+    def _add_history(self, expression, result):
+        entry = (expression, result)
+        self.history_entries.append(entry)
+        self.history_entries = self.history_entries[-100:]
+        self.settings.history = self.history_entries
+        self._append_history_entry(expression, result)
+
+    def _append_history_entry(self, expression, result):
+        href = quote(expression, safe="")
+        label = html.escape(f"{expression} = {result}")
+        self.history_display.append(
+            f'<a href="{href}" style="text-decoration:none;color:inherit">'
+            f"{label}</a>"
+        )
+        scrollbar = self.history_display.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def _load_history(self):
+        self.history_entries = list(self.settings.history)
+        self.history_display.clear()
+        for expression, result in self.history_entries:
+            self._append_history_entry(expression, result)
+
+    def clear_history(self):
+        self.history_entries = []
+        self.settings.history = []
+        self.history_display.clear()
+        self._show_status("History cleared")
 
     def _set_angle_mode(self, unit):
         self.angle_unit = unit
@@ -377,10 +676,41 @@ class ScientificCalculator(QMainWindow):
 
     def _restore_mode_status(self):
         memory_flag = " | M" if self.memory else ""
-        self.status_label.setText(f"{self.angle_unit.capitalize()} | Precision {self.decimal_precision}{memory_flag}")
+        symbol_count = len(self.program_variables) + len(self.program_formulas)
+        symbol_flag = f" | Symbols {symbol_count}" if symbol_count else ""
+        self.status_label.setText(
+            f"{self.angle_unit.capitalize()} | Precision {self.decimal_precision}"
+            f"{memory_flag}{symbol_flag}"
+        )
 
     def _show_about(self):
         AboutDialog(self).exec()
+
+    def _show_program_editor(self):
+        if self.program_dialog is None:
+            self.program_dialog = ProgramDialog(self)
+        self.program_dialog.show()
+        self.program_dialog.raise_()
+        self.program_dialog.activateWindow()
+
+    def update_program_symbols(self, variables, formulas, last_result):
+        self.program_variables = dict(variables)
+        self.program_formulas = dict(formulas)
+        self.ans = last_result
+        self._show_status(
+            f"Program symbols loaded: "
+            f"{len(variables)} variable(s), {len(formulas)} formula(s)",
+            3000,
+        )
+
+    def clear_program_symbols(self):
+        self.program_variables.clear()
+        self.program_formulas.clear()
+        if self.program_dialog is not None:
+            self.program_dialog.variables.clear()
+            self.program_dialog.formulas.clear()
+            self.program_dialog.symbols.clear()
+        self._show_status("Program variables and formulas cleared")
 
     def apply_theme(self):
         if self.theme == "dark":
@@ -412,6 +742,13 @@ class ScientificCalculator(QMainWindow):
             QPushButton#memoryButton {{ background: {colors['memory']}; }}
             QPushButton#modeButton {{ background: {colors['accent']}; color: white; }}
         """)
+
+    def closeEvent(self, event: QCloseEvent):
+        self.settings.window_geometry = self.saveGeometry()
+        if self.program_dialog is not None and not self.program_dialog.maybe_save():
+            event.ignore()
+            return
+        event.accept()
 
 
 def run():

@@ -12,6 +12,14 @@ class EngineTests(unittest.TestCase):
         self.assertIn("pi", interpreter.constants)
         self.assertIn("ans", interpreter.constants)
 
+    def test_named_variables(self):
+        variables = {"voltage": 12.5, "current": 2}
+        self.assertEqual(evaluate("voltage*current", variables=variables), 25)
+
+    def test_controlled_user_function(self):
+        functions = {"double": lambda value: value * 2}
+        self.assertEqual(evaluate("double(6)", user_functions=functions), 12)
+
     def test_operator_precedence(self):
         self.assertEqual(evaluate("5+3*2"), 11)
         self.assertEqual(evaluate("-2^2"), -4)

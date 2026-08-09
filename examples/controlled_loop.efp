@@ -1,0 +1,12 @@
+# EfCalc Pro 5.0.0 Phase 3B example
+
+total := 0
+repeat 5
+    total := total + 2
+end
+
+if total == 10
+    print(total)
+else
+    print(0)
+end
