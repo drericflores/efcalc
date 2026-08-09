@@ -21,7 +21,7 @@ from efcalc_settings import CalculatorSettings
 
 
 APP_NAME = "EfCalc Pro"
-APP_VERSION = "5.0.0-dev5"
+APP_VERSION = "5.0.0-dev5.1"
 
 
 class AboutDialog(QDialog):
@@ -331,7 +331,7 @@ class ScientificCalculator(QMainWindow):
         self._build_menus()
         self._build_shortcuts()
         self.apply_theme()
-        self._load_history()
+        self._initialize_history()
         geometry = self.settings.window_geometry
         if geometry is not None:
             self.restoreGeometry(geometry)
@@ -416,6 +416,9 @@ class ScientificCalculator(QMainWindow):
         file_menu = self.menuBar().addMenu("File")
         clear_history = QAction("Clear History", self)
         clear_history.triggered.connect(self.clear_history)
+        show_history = QAction("Show Saved History", self)
+        show_history.triggered.connect(self.show_saved_history)
+        file_menu.addAction(show_history)
         file_menu.addAction(clear_history)
         file_menu.addSeparator()
         quit_action = QAction("Quit", self)
@@ -636,11 +639,18 @@ class ScientificCalculator(QMainWindow):
         scrollbar = self.history_display.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
-    def _load_history(self):
+    def _initialize_history(self):
+        """Load history data without pre-filling the startup history panel."""
         self.history_entries = list(self.settings.history)
+        self.history_display.clear()
+
+    def show_saved_history(self):
         self.history_display.clear()
         for expression, result in self.history_entries:
             self._append_history_entry(expression, result)
+        self._show_status(
+            f"Showing {len(self.history_entries)} saved history item(s)"
+        )
 
     def clear_history(self):
         self.history_entries = []

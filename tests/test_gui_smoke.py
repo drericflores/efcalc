@@ -101,6 +101,16 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(self.window.history_entries, [])
         self.assertEqual(self.settings.history, [])
 
+    def test_saved_history_is_hidden_on_startup(self):
+        self.window.close()
+        self.settings = MemorySettings()
+        self.settings.history = [("6*6", "36")]
+        self.window = ScientificCalculator(settings=self.settings)
+        self.assertEqual(self.window.display.text(), "")
+        self.assertNotIn("6*6", self.window.history_display.toPlainText())
+        self.window.show_saved_history()
+        self.assertIn("6*6 = 36", self.window.history_display.toPlainText())
+
 
 if __name__ == "__main__":
     unittest.main()

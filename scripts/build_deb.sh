@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd -- "${script_dir}/.." && pwd)"
-version="5.0.0~rc1"
+version="5.0.0~rc2"
 package_name="efcalc-pro_${version}_all.deb"
 output_dir="${project_root}/dist"
 stage_dir="$(mktemp -d -t efcalc-pro-package.XXXXXXXX)"

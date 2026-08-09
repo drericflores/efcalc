@@ -33,7 +33,7 @@ class PackagingTests(unittest.TestCase):
     def test_control_dependencies(self):
         control = (ROOT / "packaging/control").read_text(encoding="utf-8")
         self.assertIn("Package: efcalc-pro", control)
-        self.assertIn("Version: 5.0.0~rc1", control)
+        self.assertIn("Version: 5.0.0~rc2", control)
         self.assertIn("python3-pyqt6", control)
 
     def test_xml_metadata_and_svg_are_well_formed(self):

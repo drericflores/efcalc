@@ -67,7 +67,7 @@ Build the release-candidate package reproducibly from the project root:
 Install and launch it:
 
 ```bash
-sudo apt install ./dist/efcalc-pro_5.0.0~rc1_all.deb
+sudo apt install ./dist/efcalc-pro_5.0.0~rc2_all.deb
 efcalc-pro
 ```
 
@@ -183,6 +183,8 @@ Program Symbols** to remove the shared variables and formulas deliberately.
 ## Reliability controls
 
 - Calculation history and window geometry persist between sessions.
+- EfCalc opens with a clear calculation area; saved history is displayed only
+  when **File → Show Saved History** is selected.
 - History is bounded to 100 entries to prevent uncontrolled growth.
 - **Esc** clears the calculator display and **F1** opens About.
 - Modified `.efp` programs show `*` in the editor title.
