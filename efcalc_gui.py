@@ -1,0 +1,423 @@
+"""Qt6 graphical interface for EfCalc Pro 5.0.0."""
+
+import html
+import math
+from urllib.parse import quote, unquote
+
+from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtGui import QAction, QActionGroup, QKeySequence
+from PyQt6.QtWidgets import (
+    QApplication, QDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+    QMainWindow, QMenu, QPushButton, QSpinBox, QTabWidget, QTextBrowser,
+    QVBoxLayout, QWidget, QWidgetAction,
+)
+
+from efcalc_engine import CalcError, Interpreter, Lexer, Parser
+from efcalc_settings import CalculatorSettings
+
+
+APP_NAME = "EfCalc Pro"
+APP_VERSION = "5.0.0-dev2"
+
+
+class AboutDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"About {APP_NAME}")
+        self.setMinimumSize(480, 360)
+        layout = QVBoxLayout(self)
+        tabs = QTabWidget()
+        layout.addWidget(tabs)
+
+        general = QWidget()
+        general_layout = QVBoxLayout(general)
+        general_layout.addWidget(QLabel(f"<h2>{APP_NAME} {APP_VERSION}</h2>"))
+        general_layout.addWidget(QLabel("Scientific calculator for Linux"))
+        general_layout.addWidget(QLabel("Programmed by Dr. Eric O. Flores"))
+        general_layout.addWidget(QLabel("Development release: August 2026"))
+        general_layout.addWidget(QLabel("License: GPL-3.0-or-later"))
+        general_layout.addStretch()
+        tabs.addTab(general, "About")
+
+        changes = QTextBrowser()
+        changes.setHtml("""
+            <h3>Version 5.0.0 modernization</h3>
+            <ul>
+              <li>Qt6 interface using PyQt6.</li>
+              <li>Independent, tested calculation engine.</li>
+              <li>Persistent theme and calculation preferences.</li>
+              <li>Native keyboard editing, Undo, and Redo.</li>
+              <li>Improved history, memory, and error handling.</li>
+            </ul>
+        """)
+        tabs.addTab(changes, "Changes")
+
+
+class ScientificCalculator(QMainWindow):
+    BUTTONS = (
+        (("(", "insert"), (")", "insert"), ("CLR", "clear"), ("CE", "backspace"), ("ANS", "constant")),
+        (("sin", "function"), ("cos", "function"), ("tan", "function"), ("asin", "function"), ("acos", "function")),
+        (("atan", "function"), ("sinh", "function"), ("cosh", "function"), ("tanh", "function"), ("sqrt", "function")),
+        (("log", "function"), ("ln", "function"), ("log_b", "log_base"), ("exp", "function"), ("!", "insert")),
+        (("pi", "constant"), ("e", "constant"), ("abs", "function"), ("%", "insert"), ("MR", "memory_recall")),
+        (("7", "insert"), ("8", "insert"), ("9", "insert"), ("/", "insert"), ("M+", "memory_add")),
+        (("4", "insert"), ("5", "insert"), ("6", "insert"), ("*", "insert"), ("M-", "memory_subtract")),
+        (("1", "insert"), ("2", "insert"), ("3", "insert"), ("-", "insert"), ("MC", "memory_clear")),
+        (("0", "insert"), (".", "insert"), ("^", "insert"), ("+", "insert"), ("=", "calculate")),
+    )
+
+    def __init__(self, settings=None):
+        super().__init__()
+        self.settings = settings or CalculatorSettings()
+        self.angle_unit = self.settings.angle_unit
+        self.decimal_precision = self.settings.precision
+        self.scientific_notation_enabled = self.settings.scientific_notation
+        self.theme = self.settings.theme
+        self.memory = 0.0
+        self.ans = 0.0
+        self.alpha_mode = False
+        self.shift_mode = False
+        self.interpreter = Interpreter(self.angle_unit, self.ans)
+        self._status_timer = QTimer(self)
+        self._status_timer.setSingleShot(True)
+        self._status_timer.timeout.connect(self._restore_mode_status)
+
+        self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
+        self.setMinimumSize(470, 680)
+        self._build_interface()
+        self._build_menus()
+        self.apply_theme()
+        self._restore_mode_status()
+
+    def _build_interface(self):
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+
+        self.history_display = QTextBrowser()
+        self.history_display.setObjectName("history")
+        self.history_display.setMaximumHeight(120)
+        self.history_display.setOpenExternalLinks(False)
+        self.history_display.anchorClicked.connect(self._load_history)
+        layout.addWidget(self.history_display)
+
+        self.display = QLineEdit()
+        self.display.setObjectName("display")
+        self.display.setMinimumHeight(64)
+        self.display.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.display.setPlaceholderText("Enter an expression")
+        self.display.returnPressed.connect(self.calculate_expression)
+        layout.addWidget(self.display)
+
+        self.status_label = QLabel()
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        layout.addWidget(self.status_label)
+
+        self.button_grid = QGridLayout()
+        self.button_grid.setSpacing(6)
+        self._show_calculator_buttons()
+        layout.addLayout(self.button_grid)
+
+    def _clear_buttons(self):
+        while self.button_grid.count():
+            item = self.button_grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _add_button(self, label, action, row, column):
+        button = QPushButton(label)
+        button.setObjectName(self._button_name(label))
+        button.setMinimumSize(64, 50)
+        button.clicked.connect(
+            lambda _checked=False, a=action, value=label: self._dispatch(a, value)
+        )
+        self.button_grid.addWidget(button, row, column)
+
+    def _show_calculator_buttons(self):
+        self._clear_buttons()
+        for row, button_row in enumerate(self.BUTTONS):
+            for column, (label, action) in enumerate(button_row):
+                self._add_button(label, action, row, column)
+        control_row = len(self.BUTTONS)
+        controls = (
+            ("Alpha", "alpha_toggle"), (",", "insert"),
+            ("[", "insert"), ("]", "insert"), ("Neg", "negative"),
+        )
+        for column, (label, action) in enumerate(controls):
+            self._add_button(label, action, control_row, column)
+
+    def _show_alpha_buttons(self):
+        self._clear_buttons()
+        for index in range(26):
+            letter = chr(ord("A") + index) if self.shift_mode else chr(ord("a") + index)
+            self._add_button(letter, "insert", index // 5, index % 5)
+        start_row = 6
+        controls = (
+            ("Calc", "alpha_toggle"), ("Shift", "shift_toggle"),
+            ("(", "insert"), (")", "insert"), (",", "insert"),
+            ("[", "insert"), ("]", "insert"), ("{", "insert"),
+            ("}", "insert"), ("!", "insert"),
+            ("CLR", "clear"), ("CE", "backspace"), ("Undo", "undo"),
+            ("Redo", "redo"), ("=", "calculate"),
+        )
+        for index, (label, action) in enumerate(controls):
+            self._add_button(label, action, start_row + index // 5, index % 5)
+
+    def _build_menus(self):
+        file_menu = self.menuBar().addMenu("File")
+        clear_history = QAction("Clear History", self)
+        clear_history.triggered.connect(self.history_display.clear)
+        file_menu.addAction(clear_history)
+        file_menu.addSeparator()
+        quit_action = QAction("Quit", self)
+        quit_action.setShortcut(QKeySequence.StandardKey.Quit)
+        quit_action.triggered.connect(self.close)
+        file_menu.addAction(quit_action)
+
+        edit_menu = self.menuBar().addMenu("Edit")
+        self._add_edit_action(edit_menu, "Copy", QKeySequence.StandardKey.Copy, self.display.copy)
+        self._add_edit_action(edit_menu, "Paste", QKeySequence.StandardKey.Paste, self.display.paste)
+        self._add_edit_action(edit_menu, "Undo", QKeySequence.StandardKey.Undo, self.display.undo)
+        self._add_edit_action(edit_menu, "Redo", QKeySequence.StandardKey.Redo, self.display.redo)
+
+        view_menu = self.menuBar().addMenu("View")
+        theme_action = QAction("Dark Theme", self, checkable=True)
+        theme_action.setChecked(self.theme == "dark")
+        theme_action.toggled.connect(self._set_dark_theme)
+        view_menu.addAction(theme_action)
+
+        angle_menu = view_menu.addMenu("Angle Mode")
+        angle_group = QActionGroup(self)
+        angle_group.setExclusive(True)
+        for label, unit in (("Degrees", "degrees"), ("Radians", "radians"), ("Gradians", "gradians")):
+            action = QAction(label, self, checkable=True)
+            action.setChecked(unit == self.angle_unit)
+            action.triggered.connect(lambda _checked=False, value=unit: self._set_angle_mode(value))
+            angle_group.addAction(action)
+            angle_menu.addAction(action)
+
+        format_menu = view_menu.addMenu("Output Format")
+        precision_widget = QWidget()
+        precision_layout = QHBoxLayout(precision_widget)
+        precision_layout.setContentsMargins(8, 2, 8, 2)
+        precision_layout.addWidget(QLabel("Decimal places"))
+        precision = QSpinBox()
+        precision.setRange(0, 15)
+        precision.setValue(self.decimal_precision)
+        precision.valueChanged.connect(self._set_precision)
+        precision_layout.addWidget(precision)
+        precision_action = QWidgetAction(self)
+        precision_action.setDefaultWidget(precision_widget)
+        format_menu.addAction(precision_action)
+
+        scientific = QAction("Scientific Notation", self, checkable=True)
+        scientific.setChecked(self.scientific_notation_enabled)
+        scientific.toggled.connect(self._set_scientific_notation)
+        format_menu.addAction(scientific)
+
+        help_menu = self.menuBar().addMenu("Help")
+        about = QAction("About EfCalc Pro", self)
+        about.triggered.connect(self._show_about)
+        help_menu.addAction(about)
+
+    def _add_edit_action(self, menu: QMenu, label, shortcut, callback):
+        action = QAction(label, self)
+        action.setShortcut(shortcut)
+        action.triggered.connect(callback)
+        menu.addAction(action)
+
+    @staticmethod
+    def _button_name(label):
+        if label == "=":
+            return "equalsButton"
+        if label in ("CLR", "CE"):
+            return "clearButton"
+        if label in ("M+", "M-", "MR", "MC"):
+            return "memoryButton"
+        if label in ("Alpha", "Calc", "Shift"):
+            return "modeButton"
+        if label in ("+", "-", "*", "/", "%", "^", "!"):
+            return "operatorButton"
+        return "calculatorButton"
+
+    def _dispatch(self, action, value):
+        handlers = {
+            "clear": self.display.clear,
+            "backspace": self.display.backspace,
+            "calculate": self.calculate_expression,
+            "memory_recall": lambda: self._insert(self._format_result(self.memory)),
+            "memory_clear": self._clear_memory,
+            "memory_add": lambda: self._adjust_memory(1),
+            "memory_subtract": lambda: self._adjust_memory(-1),
+            "log_base": self._insert_log_base,
+            "alpha_toggle": self._toggle_alpha_mode,
+            "shift_toggle": self._toggle_shift_mode,
+            "negative": self._insert_negative,
+            "undo": self.display.undo,
+            "redo": self.display.redo,
+        }
+        if action == "insert":
+            self._insert(value)
+        elif action == "function":
+            self._insert(f"{value}(")
+        elif action == "constant":
+            self._insert(value.lower())
+        else:
+            handlers[action]()
+
+    def _toggle_alpha_mode(self):
+        self.alpha_mode = not self.alpha_mode
+        if self.alpha_mode:
+            self._show_alpha_buttons()
+            self._show_status("Alpha mode: expression entry")
+        else:
+            self._show_calculator_buttons()
+            self._show_status("Calculator mode")
+
+    def _toggle_shift_mode(self):
+        self.shift_mode = not self.shift_mode
+        if self.alpha_mode:
+            self._show_alpha_buttons()
+        self._show_status(f"Shift: {'Uppercase' if self.shift_mode else 'Lowercase'}")
+
+    def _insert_negative(self):
+        position = self.display.cursorPosition()
+        expression = self.display.text()
+        if position == 0 or expression[position - 1] in "+-*/%^([,{":
+            self._insert("-")
+        else:
+            self._insert("*(-1)")
+
+    def _insert(self, value):
+        self.display.insert(value)
+        self.display.setFocus()
+
+    def _insert_log_base(self):
+        self._insert("log_b(,)")
+        self.display.setCursorPosition(self.display.cursorPosition() - 2)
+
+    def calculate_expression(self, set_answer=True):
+        expression = self.display.text().strip()
+        if not expression:
+            self._show_status("Enter an expression")
+            return None
+        try:
+            tree = Parser(Lexer(expression).generate_tokens()).parse()
+            result = Interpreter(self.angle_unit, self.ans).visit(tree)
+            if set_answer:
+                self.ans = result
+                formatted = self._format_result(result)
+                href = quote(expression, safe="")
+                label = html.escape(f"{expression} = {formatted}")
+                self.history_display.append(f'<a href="{href}" style="text-decoration:none;color:inherit">{label}</a>')
+                self.display.setText(formatted)
+            return result
+        except CalcError as error:
+            self._show_status(str(error), 3500)
+            self.display.selectAll()
+            return None
+        except (OverflowError, ValueError) as error:
+            self._show_status(f"Calculation error: {error}", 3500)
+            self.display.selectAll()
+            return None
+
+    def _format_result(self, value):
+        if isinstance(value, int):
+            return str(value)
+        if not isinstance(value, float):
+            return str(value)
+        if not math.isfinite(value):
+            return "Overflow" if math.isinf(value) else "NaN"
+        if self.scientific_notation_enabled:
+            return f"{value:.{self.decimal_precision}e}"
+        formatted = f"{value:.{self.decimal_precision}f}".rstrip("0").rstrip(".")
+        return formatted or "0"
+
+    def _adjust_memory(self, direction):
+        result = self.calculate_expression(set_answer=False)
+        if result is not None:
+            self.memory += direction * result
+            self._show_status(f"Memory: {self._format_result(self.memory)}")
+
+    def _clear_memory(self):
+        self.memory = 0.0
+        self._show_status("Memory cleared")
+
+    def _load_history(self, url: QUrl):
+        self.display.setText(unquote(url.toString()))
+        self.display.setFocus()
+        self._show_status("Loaded from history")
+
+    def _set_angle_mode(self, unit):
+        self.angle_unit = unit
+        self.settings.angle_unit = unit
+        self._show_status(f"Angle mode: {unit.capitalize()}")
+
+    def _set_precision(self, precision):
+        self.decimal_precision = precision
+        self.settings.precision = precision
+        self._show_status(f"Precision: {precision} decimal places")
+
+    def _set_scientific_notation(self, enabled):
+        self.scientific_notation_enabled = enabled
+        self.settings.scientific_notation = enabled
+        self._show_status(f"Scientific notation: {'On' if enabled else 'Off'}")
+
+    def _set_dark_theme(self, enabled):
+        self.theme = "dark" if enabled else "light"
+        self.settings.theme = self.theme
+        self.apply_theme()
+        self._show_status(f"Theme: {self.theme.capitalize()}")
+
+    def _show_status(self, message, duration=1800):
+        self._status_timer.stop()
+        self.status_label.setText(message)
+        self._status_timer.start(duration)
+
+    def _restore_mode_status(self):
+        memory_flag = " | M" if self.memory else ""
+        self.status_label.setText(f"{self.angle_unit.capitalize()} | Precision {self.decimal_precision}{memory_flag}")
+
+    def _show_about(self):
+        AboutDialog(self).exec()
+
+    def apply_theme(self):
+        if self.theme == "dark":
+            colors = {
+                "window": "#20242b", "text": "#e6edf3", "display": "#11161d",
+                "button": "#30363d", "border": "#59636e", "accent": "#2f81f7",
+                "operator": "#3d4f66", "clear": "#b0444c", "memory": "#6246a8",
+            }
+        else:
+            colors = {
+                "window": "#f4f6f8", "text": "#17202a", "display": "#ffffff",
+                "button": "#e7ebef", "border": "#aeb8c2", "accent": "#198754",
+                "operator": "#cfe2ff", "clear": "#dc5a63", "memory": "#d9ccff",
+            }
+        self.setStyleSheet(f"""
+            QMainWindow {{ background: {colors['window']}; color: {colors['text']}; }}
+            QLabel {{ color: {colors['text']}; }}
+            QLineEdit#display {{ background: {colors['display']}; color: {colors['text']};
+                border: 2px solid {colors['border']}; border-radius: 8px;
+                padding: 8px; font-size: 24pt; }}
+            QTextBrowser#history {{ background: {colors['display']}; color: {colors['text']};
+                border: 1px solid {colors['border']}; border-radius: 6px; }}
+            QPushButton {{ background: {colors['button']}; color: {colors['text']};
+                border: 1px solid {colors['border']}; border-radius: 6px; font-size: 11pt; }}
+            QPushButton:hover {{ border: 2px solid {colors['accent']}; }}
+            QPushButton#equalsButton {{ background: {colors['accent']}; color: white; font-weight: bold; }}
+            QPushButton#operatorButton {{ background: {colors['operator']}; }}
+            QPushButton#clearButton {{ background: {colors['clear']}; color: white; }}
+            QPushButton#memoryButton {{ background: {colors['memory']}; }}
+            QPushButton#modeButton {{ background: {colors['accent']}; color: white; }}
+        """)
+
+
+def run():
+    app = QApplication.instance() or QApplication([])
+    app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(APP_VERSION)
+    window = ScientificCalculator()
+    window.show()
+    return app.exec()
