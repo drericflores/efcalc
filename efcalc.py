@@ -32,6 +32,10 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtCore import Qt, QTimer, QUrl
 
+# EfCalc Pro 5.0.0 calculation engine. These imports intentionally replace the
+# legacy in-file engine during the controlled migration.
+from efcalc_engine import CalcError, Interpreter, Lexer, Parser
+
 # --- Custom Exception for clearer error handling ---
 class CalcError(Exception):
     pass
@@ -460,6 +464,9 @@ class Interpreter:
         else:
             raise CalcError(f"Unknown constant: {const_name}")
 
+from efcalc_engine import CalcError, Interpreter, Lexer, Parser
+
+
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -472,9 +479,9 @@ class AboutDialog(QDialog):
 
         pane1 = QWidget()
         pane1_layout = QVBoxLayout(pane1)
-        pane1_layout.addWidget(QLabel("<b>EfCalc Pro - Version 4.5 (Patched)</b>"))
+        pane1_layout.addWidget(QLabel("<b>EfCalc Pro - Version 5.0.0 Development</b>"))
         pane1_layout.addWidget(QLabel("Author: Dr. Eric O. Flores"))
-        pane1_layout.addWidget(QLabel("Revised August 9, 2025"))
+        pane1_layout.addWidget(QLabel("Development started August 9, 2026"))
         pane1_layout.addWidget(QLabel("Email: eoftoro@gmail.com"))
         pane1_layout.addStretch()
         tab_widget.addTab(pane1, "General Info")
@@ -772,8 +779,8 @@ class ScientificCalculator(QMainWindow):
 
             elif text == 'log_b':
                 self._insert_text("log_b(,)")
-                # Position cursor between the comma and closing parenthesis
-                self.display.setCursorPosition(self.display.cursorPosition() - 3)
+                # Position the cursor between the opening parenthesis and comma.
+                self.display.setCursorPosition(self.display.cursorPosition() - 2)
 
             elif text == 'fact':
                 self._insert_text("!")
@@ -1064,17 +1071,9 @@ class ScientificCalculator(QMainWindow):
                     formatted = formatted[:-1]
             if not formatted:
                 formatted = "0"
-            try:
-                if '.' in formatted:
-                    parts = formatted.split('.')
-                    whole_part = parts[0]
-                    decimal_part = parts[1]
-                    whole_part_formatted = "{:,}".format(int(whole_part)) if whole_part not in ['', '-'] else whole_part
-                    return f"{whole_part_formatted}.{decimal_part}"
-                else:
-                    return "{:,}".format(int(formatted))
-            except (ValueError, IndexError):
-                return str(value)
+            # Keep the displayed value directly reusable by the expression
+            # parser. Thousands separators are intentionally not inserted.
+            return formatted
 
     def _push_to_undo_stack(self, text):
         if not self.undo_stack or self.undo_stack[-1] != text:
@@ -1121,4 +1120,3 @@ if __name__ == '__main__':
     window = ScientificCalculator()
     window.show()
     sys.exit(app.exec_())
-
